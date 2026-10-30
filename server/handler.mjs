@@ -4,7 +4,6 @@ import { readPortfolio, writePortfolio } from './portfolio.mjs';
 
 const COOKIE = 'activos_session';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
-const WINDOW_MS = 15 * 60 * 1000;
 
 function cookieToken(req) {
     const value = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
@@ -30,16 +29,6 @@ async function jsonBody(req) {
     }
     if (Buffer.byteLength(raw) > 2_000_000) throw new HttpError(413, 'La cartera supera el tamaño máximo de 2 MB.');
     try { return JSON.parse(raw); } catch { throw new HttpError(400, 'La solicitud no contiene datos válidos.'); }
-}
-
-async function limitLogin(db, key, max, now) {
-    const window = Math.floor(now / WINDOW_MS);
-    const result = await db.collection('login_attempts').findOneAndUpdate(
-        { _id: `${key}:${window}` },
-        { $inc: { count: 1 }, $setOnInsert: { expiresAt: new Date((window + 1) * WINDOW_MS) } },
-        { upsert: true, returnDocument: 'after' },
-    );
-    if (result.count > max) throw new HttpError(429, 'No se pudo completar la operación. Volvé a intentar más tarde.', 'RATE_LIMITED');
 }
 
 async function requireUser(db, req, now) {
@@ -82,9 +71,6 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             const now = clock();
             if (path === '/api/login' || path === '/api/register') {
                 const registering = path === '/api/register';
-                // Solo confiar en la IP sobrescrita por Vercel; en local se usa el socket.
-                const ip = env.VERCEL === '1' ? String(req.headers['x-vercel-forwarded-for'] || 'unknown').split(',')[0].trim() : req.socket?.remoteAddress || 'local';
-                await limitLogin(db, `${registering ? 'register' : 'login'}:ip:${digest(ip)}`, registering ? 5 : 30, now);
                 const body = await jsonBody(req);
                 const email = normalizeEmail(body?.email);
                 if (!validEmail(email) || !validPin(body?.pin)) throw new HttpError(400, 'Ingresá un correo válido y un PIN de 6 dígitos.');
@@ -98,7 +84,6 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                     }
                     return reply(201, await startSession(db, req, res, user, now, production));
                 }
-                await limitLogin(db, `email:${digest(email)}`, 5, now);
                 const user = await db.collection('users').findOne({ email });
                 const valid = await verifyPin(body.pin, user?.pinHash);
                 if (!valid || !user || user.disabled) throw new HttpError(401, 'Correo o PIN incorrectos.', 'INVALID_CREDENTIALS');
