@@ -1,0 +1,125 @@
+import { getDatabase } from './database.mjs';
+import { digest, hashPin, HttpError, newToken, normalizeEmail, validEmail, validPin, verifyPin } from './security.mjs';
+import { readPortfolio, writePortfolio } from './portfolio.mjs';
+
+const COOKIE = 'activos_session';
+const SESSION_SECONDS = 7 * 24 * 60 * 60;
+const WINDOW_MS = 15 * 60 * 1000;
+
+function cookieToken(req) {
+    const value = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
+    return value && /^[\w-]{43}$/.test(value) ? value : null;
+}
+
+function setCookie(res, token, production) {
+    res.setHeader('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${token ? SESSION_SECONDS : 0}${production ? '; Secure' : ''}`);
+}
+
+async function jsonBody(req) {
+    if (!req.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, 'Formato de solicitud inválido.');
+    let raw;
+    if (req.body !== undefined) raw = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    else {
+        const chunks = []; let size = 0;
+        for await (const chunk of req) {
+            size += Buffer.byteLength(chunk);
+            if (size > 2_000_000) throw new HttpError(413, 'La cartera supera el tamaño máximo de 2 MB.');
+            chunks.push(Buffer.from(chunk));
+        }
+        raw = Buffer.concat(chunks).toString('utf8');
+    }
+    if (Buffer.byteLength(raw) > 2_000_000) throw new HttpError(413, 'La cartera supera el tamaño máximo de 2 MB.');
+    try { return JSON.parse(raw); } catch { throw new HttpError(400, 'La solicitud no contiene datos válidos.'); }
+}
+
+async function limitLogin(db, key, max, now) {
+    const window = Math.floor(now / WINDOW_MS);
+    const result = await db.collection('login_attempts').findOneAndUpdate(
+        { _id: `${key}:${window}` },
+        { $inc: { count: 1 }, $setOnInsert: { expiresAt: new Date((window + 1) * WINDOW_MS) } },
+        { upsert: true, returnDocument: 'after' },
+    );
+    if (result.count > max) throw new HttpError(429, 'No se pudo completar la operación. Volvé a intentar más tarde.', 'RATE_LIMITED');
+}
+
+async function requireUser(db, req, now) {
+    const token = cookieToken(req);
+    const session = token && await db.collection('sessions').findOne({ _id: digest(token), expiresAt: { $gt: new Date(now) } });
+    const user = session && await db.collection('users').findOne({ _id: session.userId, disabled: { $ne: true } }, { projection: { email: 1 } });
+    if (!user) throw new HttpError(401, 'Ingresá con tu correo y PIN para continuar.', 'UNAUTHENTICATED');
+    return user;
+}
+
+async function startSession(db, req, res, user, now, production) {
+    const snapshot = await readPortfolio(db, user._id);
+    const token = newToken();
+    await db.collection('sessions').insertOne({ _id: digest(token), userId: user._id, createdAt: new Date(now), expiresAt: new Date(now + SESSION_SECONDS * 1000) });
+    const oldToken = cookieToken(req);
+    if (oldToken) await db.collection('sessions').deleteOne({ _id: digest(oldToken) });
+    setCookie(res, token, production);
+    return { user: { id: user._id.toString(), email: user.email }, ...snapshot };
+}
+
+export function createHandler({ database = getDatabase, env = process.env, clock = Date.now } = {}) {
+    return async function handler(req, res) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        const reply = (status, data) => { res.statusCode = status; res.end(JSON.stringify(data)); };
+        try {
+            const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
+            const method = req.method;
+            const allowed = { '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'] }[path];
+            if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
+            if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
+            const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
+            if (method !== 'GET') {
+                const origin = env.APP_ORIGIN || (!production ? 'http://localhost:5173' : '');
+                if (!origin) throw new HttpError(503, 'El acceso todavía no está habilitado.', 'NOT_CONFIGURED');
+                if (req.headers.origin !== new URL(origin).origin || req.headers['x-activos-request'] !== '1') throw new HttpError(403, 'Origen de solicitud no permitido.');
+            }
+            const db = await database();
+            const now = clock();
+            if (path === '/api/login' || path === '/api/register') {
+                const registering = path === '/api/register';
+                // Solo confiar en la IP sobrescrita por Vercel; en local se usa el socket.
+                const ip = env.VERCEL === '1' ? String(req.headers['x-vercel-forwarded-for'] || 'unknown').split(',')[0].trim() : req.socket?.remoteAddress || 'local';
+                await limitLogin(db, `${registering ? 'register' : 'login'}:ip:${digest(ip)}`, registering ? 5 : 30, now);
+                const body = await jsonBody(req);
+                const email = normalizeEmail(body?.email);
+                if (!validEmail(email) || !validPin(body?.pin)) throw new HttpError(400, 'Ingresá un correo válido y un PIN de 6 dígitos.');
+                if (registering) {
+                    if (body.pin !== body.confirmPin) throw new HttpError(400, 'Los PINs no coinciden.');
+                    const user = { email, pinHash: await hashPin(body.pin), createdAt: new Date(now) };
+                    try { user._id = (await db.collection('users').insertOne(user)).insertedId; }
+                    catch (error) {
+                        if (error.code === 11000) throw new HttpError(409, 'Ya existe una cuenta con ese correo. Ingresá con tu PIN.', 'ACCOUNT_EXISTS');
+                        throw error;
+                    }
+                    return reply(201, await startSession(db, req, res, user, now, production));
+                }
+                await limitLogin(db, `email:${digest(email)}`, 5, now);
+                const user = await db.collection('users').findOne({ email });
+                const valid = await verifyPin(body.pin, user?.pinHash);
+                if (!valid || !user || user.disabled) throw new HttpError(401, 'Correo o PIN incorrectos.', 'INVALID_CREDENTIALS');
+                return reply(200, await startSession(db, req, res, user, now, production));
+            }
+            if (path === '/api/logout') {
+                const token = cookieToken(req);
+                if (token) await db.collection('sessions').deleteOne({ _id: digest(token) });
+                setCookie(res, '', production);
+                return reply(200, { ok: true });
+            }
+            const user = await requireUser(db, req, now);
+            if (path === '/api/session') return reply(200, { user: { id: user._id.toString(), email: user.email }, ...await readPortfolio(db, user._id) });
+            if (method === 'GET') return reply(200, await readPortfolio(db, user._id));
+            return reply(200, await writePortfolio(db, user._id, await jsonBody(req)));
+        } catch (error) {
+            if (error instanceof HttpError) return reply(error.status, { error: error.message, code: error.code });
+            // No registrar cuerpos, cookies, PINs ni errores del driver que puedan incluir credenciales.
+            return reply(503, { error: 'No se pudo completar la operación. Volvé a intentar.', code: 'UNAVAILABLE' });
+        }
+    };
+}
+
+export default createHandler();
