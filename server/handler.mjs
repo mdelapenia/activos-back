@@ -1,6 +1,7 @@
 import { getDatabase } from './database.mjs';
 import { digest, hashPin, HttpError, newToken, normalizeEmail, validEmail, validPin, verifyPin } from './security.mjs';
 import { readPortfolio, writePortfolio } from './portfolio.mjs';
+import { portfolioDividends } from './dividends.mjs';
 
 const COOKIE = 'activos_session';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
@@ -58,7 +59,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
         try {
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
-            const allowed = { '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'] }[path];
+            const allowed = { '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'] }[path];
             if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
             if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
@@ -97,6 +98,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             }
             const user = await requireUser(db, req, now);
             if (path === '/api/session') return reply(200, { user: { id: user._id.toString(), email: user.email }, ...await readPortfolio(db, user._id) });
+            if (path === '/api/dividends') return reply(200, await portfolioDividends((await readPortfolio(db, user._id)).portfolio, env.MASSIVE_API_KEY));
             if (method === 'GET') return reply(200, await readPortfolio(db, user._id));
             return reply(200, await writePortfolio(db, user._id, await jsonBody(req)));
         } catch (error) {
