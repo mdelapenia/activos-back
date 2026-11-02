@@ -11,7 +11,7 @@ function cookieToken(req) {
 }
 
 function setCookie(res, token, production) {
-    res.setHeader('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${token ? SESSION_SECONDS : 0}${production ? '; Secure' : ''}`);
+    res.setHeader('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=${production ? 'None' : 'Strict'}; Max-Age=${token ? SESSION_SECONDS : 0}${production ? '; Secure' : ''}`);
 }
 
 async function jsonBody(req) {

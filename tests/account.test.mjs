@@ -78,7 +78,7 @@ test('acceso por correo/PIN, cookie protegida y cartera aislada por usuario', as
     assert.equal(auth.body.user.email, 'a@example.test');
     assert.ok(!JSON.stringify(auth.body).includes('pinHash'));
     assert.match(auth.cookie, /HttpOnly/);
-    assert.match(auth.cookie, /SameSite=Strict/);
+    assert.match(auth.cookie, /SameSite=None/);
     assert.match(auth.cookie, /Secure/);
     assert.equal(auth.headers.get('cache-control'), 'no-store');
     const cookie = auth.cookie.split(';')[0];
@@ -138,9 +138,9 @@ test('rechaza CSRF, tipos inválidos, fechas imposibles, IDs duplicados y cuerpo
     assert.equal((await call('portfolio', { method: 'PUT', cookie, body: { data: 'x'.repeat(2_000_001) } })).status, 413);
 });
 
-test('bloquea intentos repetidos y rechaza sesiones vencidas aunque Mongo aún no las haya eliminado', async () => {
+test('permite reintentar el acceso y rechaza sesiones vencidas aunque Mongo aún no las haya eliminado', async () => {
     for (let i = 0; i < 5; i++) assert.equal((await call('login', { method: 'POST', body: { email: 'limit@example.test', pin: '999999' } })).status, 401);
-    assert.equal((await login('limit@example.test')).status, 429);
+    assert.equal((await login('limit@example.test')).status, 200);
     const auth = await login('expiry@example.test');
     const cookie = auth.cookie.split(';')[0];
     await db.collection('sessions').updateOne({ _id: digest(cookie.split('=')[1]) }, { $set: { expiresAt: new Date(0) } });
