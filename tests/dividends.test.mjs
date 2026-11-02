@@ -19,3 +19,17 @@ test('calcula dividendos por CEDEAR y señala compras posteriores al corte', asy
     assert.doesNotMatch(JSON.stringify(result), /secret/);
     assert.deepEqual(await portfolioDividends(portfolio, ''), { configured: false, items: [] });
 });
+
+test('incluye dividendos de ETF de índices registrados como CEDEARs', async () => {
+    const investments = ['SPY', 'QQQ'].map((coin, index) => ({ id: String(index), name: coin, kind: 'cedear', coin, units: 60, date: '2025-01-01' }));
+    const symbols = [];
+    const fetcher = async url => {
+        if (String(url).includes('cedears.json')) return { ok: true, json: async () => ({ items: [{ Cedears: 'SPY', Ratio: '60', TickerOriginal: 'SPY' }, { Cedears: 'QQQ', Ratio: '20', TickerOriginal: 'QQQ' }] }) };
+        symbols.push(url.searchParams.get('ticker'));
+        return { ok: true, json: async () => ({ results: [{ pay_date: '2099-02-01', ex_dividend_date: '2099-01-03', cash_amount: 2, currency: 'USD' }] }) };
+    };
+    const { items } = await portfolioDividends({ investments }, 'secret', fetcher);
+    assert.deepEqual(symbols.sort(), ['QQQ', 'SPY']);
+    assert.equal(items[0].events[0].estimatedGross, 2);
+    assert.equal(items[1].events[0].estimatedGross, 6);
+});
