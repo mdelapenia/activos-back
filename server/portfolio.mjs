@@ -27,11 +27,19 @@ export function validatePortfolio(raw) {
         if (!text(i.coin, 150) || !positive(i.units)) return invalid();
         return { ...item, coin: i.coin, units: i.units };
     });
+    const sales = raw.sales ?? [];
+    if (!Array.isArray(sales) || sales.length > 10000) return invalid();
+    for (const s of sales) {
+        if (!s || !text(s.id, 128) || !text(s.name, 70) || typeof s.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s.date) || !positive(s.fraction) || s.fraction > 1 || !positive(s.proceeds) || !positive(s.cost) || !['ARS', 'USD'].includes(s.currency) || !['ARS', 'USD'].includes(s.costCurrency)) return invalid();
+        const date = new Date(`${s.date}T12:00:00Z`);
+        if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== s.date) return invalid();
+    }
     const p = raw.preferences;
     if (!p || !['dark', 'light'].includes(p.theme) || !['USD', 'ARS'].includes(p.display)
         || !['bolsa', 'contadoconliqui', 'blue', 'oficial', 'mayorista', 'cripto', 'tarjeta'].includes(p.dollar)
         || typeof p.hidden !== 'boolean' || typeof p.sidebarCollapsed !== 'boolean' || ![0, 12, 36, 60].includes(p.horizon)) return invalid();
-    return { investments, preferences: { theme: p.theme, display: p.display, dollar: p.dollar, hidden: p.hidden, sidebarCollapsed: p.sidebarCollapsed, horizon: p.horizon } };
+    if (p.panels !== undefined && (!Array.isArray(p.panels) || p.panels.some(x => !['value', 'evolution', 'distribution', 'investments', 'inflation'].includes(x)))) return invalid();
+    return { investments, ...(raw.sales === undefined ? {} : { sales: sales.map(({ id, name, date, fraction, proceeds, currency, cost, costCurrency }) => ({ id, name, date, fraction, proceeds, currency, cost, costCurrency })) }), preferences: { theme: p.theme, display: p.display, dollar: p.dollar, hidden: p.hidden, sidebarCollapsed: p.sidebarCollapsed, horizon: p.horizon, ...(p.panels === undefined ? {} : { panels: p.panels }) } };
 }
 
 export async function readPortfolio(db, userId) {
