@@ -2,10 +2,16 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { HttpError } from './security.mjs';
 
 const providers = ['openai', 'claude', 'gemini'];
+export function detectProvider(key) {
+    if (key.startsWith('sk-ant-')) return 'claude';
+    if (key.startsWith('sk-')) return 'openai';
+    if (key.startsWith('AIza')) return 'gemini';
+    return null;
+}
 function masterKey(env) {
     const encoded = env.AI_ENCRYPTION_KEY || '';
     const key = Buffer.from(encoded, 'base64');
-    if (key.length !== 32 || key.toString('base64') !== encoded) throw new HttpError(503, 'Falta configurar AI_ENCRYPTION_KEY en el servidor.');
+    if (key.length !== 32 || key.toString('base64') !== encoded) throw new HttpError(503, 'AI_ENCRYPTION_KEY falta o tiene un formato inválido: debe ser una clave de 32 bytes codificada en base64.', 'AI_ENCRYPTION_KEY_INVALID');
     return key;
 }
 function encrypt(value, env, userId, provider) {
@@ -24,14 +30,16 @@ export async function keySettings(db, user, env, body) {
         const row = await db.collection('ai_keys').findOne({ _id: user._id });
         return { providers: providers.filter(p => row?.keys?.[p]) };
     }
-    const { provider, key, remove } = body;
-    if (!providers.includes(provider)) throw new HttpError(400, 'Proveedor inválido.');
+    const { key, remove } = body;
+    const provider = remove === true ? body.provider : typeof key === 'string' ? detectProvider(key.trim()) : null;
+    if (!providers.includes(provider)) throw new HttpError(400, 'No se pudo identificar el proveedor. Usá una API key compatible de OpenAI, Claude o Gemini.');
     if (remove === true) await db.collection('ai_keys').updateOne({ _id: user._id }, { $unset: { [`keys.${provider}`]: '' } });
     else {
-        if (typeof key !== 'string' || key.trim().length < 10 || key.length > 512 || /\s/.test(key)) throw new HttpError(400, 'Ingresá una API key válida.');
-        await db.collection('ai_keys').updateOne({ _id: user._id }, { $set: { [`keys.${provider}`]: encrypt(key, env, user._id, provider) } }, { upsert: true });
+        const normalized = key.trim();
+        if (normalized.length < 10 || normalized.length > 512 || /\s/.test(normalized)) throw new HttpError(400, 'Ingresá una API key válida.');
+        await db.collection('ai_keys').updateOne({ _id: user._id }, { $set: { [`keys.${provider}`]: encrypt(normalized, env, user._id, provider) } }, { upsert: true });
     }
-    return keySettings(db, user, env);
+    return { ...await keySettings(db, user, env), provider };
 }
 export async function marketChat(db, user, env, body) {
     const { provider, messages, assets } = body || {};
