@@ -6,6 +6,7 @@ test('detecta el proveedor por el formato sin confundir Claude con OpenAI', () =
     assert.equal(detectProvider('sk-ant-test'), 'claude');
     assert.equal(detectProvider('sk-proj-test'), 'openai');
     assert.equal(detectProvider('AIza-test'), 'gemini');
+    assert.equal(detectProvider('AQ.example-auth-key'), 'gemini');
     assert.equal(detectProvider('desconocida'), null);
 });
 

@@ -5,7 +5,7 @@ const providers = ['openai', 'claude', 'gemini'];
 export function detectProvider(key) {
     if (key.startsWith('sk-ant-')) return 'claude';
     if (key.startsWith('sk-')) return 'openai';
-    if (key.startsWith('AIza')) return 'gemini';
+    if (key.startsWith('AIza') || key.startsWith('AQ.')) return 'gemini';
     return null;
 }
 function masterKey(env) {
