@@ -61,7 +61,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
         try {
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
-            const allowed = { '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/inflation/us': ['GET'] }[path];
+            const allowed = { '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
             if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
             if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
@@ -104,6 +104,13 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             if (path === '/api/passkey/status') return reply(200, { count: await db.collection('passkeys').countDocuments({ userId: user._id }) });
             if (path === '/api/passkey/register/options') return reply(200, await registrationOptions(db, user, env, now));
             if (path === '/api/passkey/register/verify') return reply(200, await registerPasskey(db, user, await jsonBody(req), env, now));
+            if (path === '/api/benchmarks/merval') {
+                const response = await fetch('https://rosariofinanzas.ar/api/market/historical?symbol=MERVAL&period=1Y', { signal: AbortSignal.timeout(20000) });
+                if (!response.ok) throw new HttpError(503, 'No se pudo consultar el Merval.');
+                const rows = await response.json();
+                if (!Array.isArray(rows)) throw new HttpError(503, 'Historial del Merval inválido.');
+                return reply(200, rows.flatMap(row => typeof row?.date === 'string' && Number.isFinite(row.close) && row.close > 0 ? [{ fecha: row.date.slice(0, 10), valor: row.close }] : []));
+            }
             if (path === '/api/inflation/us') return reply(200, await usInflation(now));
             if (path === '/api/session') return reply(200, { user: { id: user._id.toString(), email: user.email }, ...await readPortfolio(db, user._id) });
             if (path === '/api/dividends') return reply(200, await portfolioDividends((await readPortfolio(db, user._id)).portfolio, env.MASSIVE_API_KEY));
