@@ -39,7 +39,7 @@ export function validatePortfolio(raw) {
     if (!p || !['dark', 'light'].includes(p.theme) || !['USD', 'ARS'].includes(p.display)
         || !['bolsa', 'contadoconliqui', 'blue', 'oficial', 'mayorista', 'cripto', 'tarjeta'].includes(p.dollar)
         || typeof p.hidden !== 'boolean' || typeof p.sidebarCollapsed !== 'boolean' || ![0, 12, 36, 60].includes(p.horizon)) return invalid();
-    if (p.panels !== undefined && (!Array.isArray(p.panels) || p.panels.some(x => !['value', 'evolution', 'distribution', 'investments', 'inflation'].includes(x)))) return invalid();
+    if (p.panels !== undefined && (!Array.isArray(p.panels) || p.panels.some(x => !['value', 'evolution', 'distribution', 'investments', 'inflation', 'macro', 'streak', 'panel-v2'].includes(x)))) return invalid();
     return { investments, ...(raw.sales === undefined ? {} : { sales: sales.map(({ id, name, date, fraction, proceeds, currency, cost, costCurrency }) => ({ id, name, date, fraction, proceeds, currency, cost, costCurrency })) }), preferences: { theme: p.theme, display: p.display, dollar: p.dollar, hidden: p.hidden, sidebarCollapsed: p.sidebarCollapsed, horizon: p.horizon, ...(p.panels === undefined ? {} : { panels: p.panels }) } };
 }
 
