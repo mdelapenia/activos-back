@@ -146,3 +146,20 @@ test('permite reintentar el acceso y rechaza sesiones vencidas aunque Mongo aún
     await db.collection('sessions').updateOne({ _id: digest(cookie.split('=')[1]) }, { $set: { expiresAt: new Date(0) } });
     assert.equal((await call('session', { cookie })).status, 401);
 });
+
+test('passkeys exigen sesión para registrar y rechazan desafíos reutilizados', async () => {
+    assert.equal((await call('passkey/register/options', { method: 'POST', body: {} })).status, 401);
+    const auth = await login('a@example.test');
+    const cookie = auth.cookie.split(';')[0];
+    const registration = await call('passkey/register/options', { method: 'POST', body: {}, cookie });
+    assert.equal(registration.status, 200);
+    assert.equal(registration.body.options.rp.id, 'activos.example.test');
+    const attempt = { challengeId: registration.body.challengeId, response: {} };
+    assert.equal((await call('passkey/register/verify', { method: 'POST', body: attempt, cookie })).status, 400);
+    assert.equal((await call('passkey/register/verify', { method: 'POST', body: attempt, cookie })).status, 400);
+    const options = await call('passkey/login/options', { method: 'POST', body: {} });
+    assert.equal(options.status, 200);
+    const invalid = { challengeId: options.body.challengeId, response: { id: 'invalid' } };
+    assert.equal((await call('passkey/login/verify', { method: 'POST', body: invalid })).status, 401);
+    assert.equal((await call('passkey/login/verify', { method: 'POST', body: invalid })).status, 400);
+});

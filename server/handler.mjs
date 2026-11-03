@@ -1,3 +1,4 @@
+import { registrationOptions, registerPasskey, authenticationOptions, authenticatePasskey } from './passkeys.mjs';
 import { usInflation } from './inflation.mjs';
 import { getDatabase } from './database.mjs';
 import { digest, hashPin, HttpError, newToken, normalizeEmail, validEmail, validPin, verifyPin } from './security.mjs';
@@ -60,7 +61,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
         try {
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
-            const allowed = { '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/inflation/us': ['GET'] }[path];
+            const allowed = { '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/inflation/us': ['GET'] }[path];
             if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
             if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
@@ -71,6 +72,8 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             }
             const db = await database();
             const now = clock();
+            if (path === '/api/passkey/login/options') return reply(200, await authenticationOptions(db, env, now));
+            if (path === '/api/passkey/login/verify') return reply(200, await startSession(db, req, res, await authenticatePasskey(db, await jsonBody(req), env, now), now, production));
             if (path === '/api/login' || path === '/api/register') {
                 const registering = path === '/api/register';
                 const body = await jsonBody(req);
@@ -98,6 +101,8 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 return reply(200, { ok: true });
             }
             const user = await requireUser(db, req, now);
+            if (path === '/api/passkey/register/options') return reply(200, await registrationOptions(db, user, env, now));
+            if (path === '/api/passkey/register/verify') return reply(200, await registerPasskey(db, user, await jsonBody(req), env, now));
             if (path === '/api/inflation/us') return reply(200, await usInflation(now));
             if (path === '/api/session') return reply(200, { user: { id: user._id.toString(), email: user.email }, ...await readPortfolio(db, user._id) });
             if (path === '/api/dividends') return reply(200, await portfolioDividends((await readPortfolio(db, user._id)).portfolio, env.MASSIVE_API_KEY));
