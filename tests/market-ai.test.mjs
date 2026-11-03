@@ -22,8 +22,8 @@ test('guarda claves cifradas por usuario y permite eliminarlas', async () => {
     }) };
     const env = { AI_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64') };
     const user = { _id: 'user1' }, key = 'sk-secret-test-key';
-    assert.deepEqual(await keySettings(db, user, env, { key }), { providers: ['openai'], provider: 'openai' });
+    assert.deepEqual(await keySettings(db, user, env, { key }), { providers: ['openai'], masks: { openai: 'sk-*****' }, provider: 'openai' });
     assert.ok(!JSON.stringify(row).includes(key));
-    assert.deepEqual(await keySettings(db, user, env, { provider: 'openai', remove: true }), { providers: [], provider: 'openai' });
+    assert.deepEqual(await keySettings(db, user, env, { provider: 'openai', remove: true }), { providers: [], masks: {}, provider: 'openai' });
     await assert.rejects(keySettings(db, user, {}, { provider: 'openai', key }), /AI_ENCRYPTION_KEY/);
 });

@@ -28,7 +28,9 @@ function decrypt(value, env, userId, provider) {
 export async function keySettings(db, user, env, body) {
     if (!body) {
         const row = await db.collection('ai_keys').findOne({ _id: user._id });
-        return { providers: providers.filter(p => row?.keys?.[p]) };
+        const configured = providers.filter(p => row?.keys?.[p]);
+        const masks = Object.fromEntries(configured.map(p => [p, `${decrypt(row.keys[p], env, user._id, p).slice(0, 3)}*****`]));
+        return { providers: configured, masks };
     }
     const { key, remove } = body;
     const provider = remove === true ? body.provider : typeof key === 'string' ? detectProvider(key.trim()) : null;
