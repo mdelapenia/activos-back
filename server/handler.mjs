@@ -61,7 +61,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
         try {
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
-            const allowed = { '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/inflation/us': ['GET'] }[path];
+            const allowed = { '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/inflation/us': ['GET'] }[path];
             if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
             if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
@@ -101,6 +101,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 return reply(200, { ok: true });
             }
             const user = await requireUser(db, req, now);
+            if (path === '/api/passkey/status') return reply(200, { count: await db.collection('passkeys').countDocuments({ userId: user._id }) });
             if (path === '/api/passkey/register/options') return reply(200, await registrationOptions(db, user, env, now));
             if (path === '/api/passkey/register/verify') return reply(200, await registerPasskey(db, user, await jsonBody(req), env, now));
             if (path === '/api/inflation/us') return reply(200, await usInflation(now));

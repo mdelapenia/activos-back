@@ -163,3 +163,13 @@ test('passkeys exigen sesión para registrar y rechazan desafíos reutilizados',
     assert.equal((await call('passkey/login/verify', { method: 'POST', body: invalid })).status, 401);
     assert.equal((await call('passkey/login/verify', { method: 'POST', body: invalid })).status, 400);
 });
+
+test('el estado de passkeys requiere sesión y cuenta solo las de la cuenta', async () => {
+    assert.equal((await call('passkey/status')).status, 401);
+    const first = await login('a@example.test');
+    const second = await login('b@example.test');
+    const a = await db.collection('users').findOne({ email: 'a@example.test' });
+    await db.collection('passkeys').insertOne({ _id: 'status-test', userId: a._id });
+    assert.equal((await call('passkey/status', { cookie: first.cookie.split(';')[0] })).body.count, 1);
+    assert.equal((await call('passkey/status', { cookie: second.cookie.split(';')[0] })).body.count, 0);
+});
