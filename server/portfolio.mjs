@@ -36,7 +36,7 @@ export function validatePortfolio(raw) {
         if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== s.date) return invalid();
     }
     const p = raw.preferences;
-    if (!p || !['dark', 'light'].includes(p.theme) || !['USD', 'ARS'].includes(p.display)
+    if (!p || !['dark', 'light', 'system'].includes(p.theme) || !['USD', 'ARS'].includes(p.display)
         || !['bolsa', 'contadoconliqui', 'blue', 'oficial', 'mayorista', 'cripto', 'tarjeta'].includes(p.dollar)
         || typeof p.hidden !== 'boolean' || typeof p.sidebarCollapsed !== 'boolean' || ![0, 12, 36, 60].includes(p.horizon)) return invalid();
     if (p.panels !== undefined && (!Array.isArray(p.panels) || p.panels.some(x => !['value', 'evolution', 'distribution', 'investments', 'inflation', 'macro', 'streak', 'panel-v2'].includes(x)))) return invalid();
