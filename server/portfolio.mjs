@@ -25,7 +25,8 @@ export function validatePortfolio(raw) {
             return { ...item, rate: i.rate, period: i.period };
         }
         if (!text(i.coin, 150) || !positive(i.units)) return invalid();
-        return { ...item, coin: i.coin, units: i.units };
+        if ((i.purchasePrice != null && !positive(i.purchasePrice)) || (i.purchaseFx != null && !positive(i.purchaseFx))) return invalid();
+        return { ...item, coin: i.coin, units: i.units, ...(i.purchasePrice != null ? { purchasePrice: i.purchasePrice } : {}), ...(i.purchaseFx != null ? { purchaseFx: i.purchaseFx } : {}) };
     });
     const sales = raw.sales ?? [];
     if (!Array.isArray(sales) || sales.length > 10000) return invalid();
