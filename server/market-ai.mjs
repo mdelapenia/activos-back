@@ -4,10 +4,11 @@ import { HttpError } from './security.mjs';
 
 
 
-const providers = ['openai', 'claude', 'gemini'];
+const providers = ['openai', 'claude', 'gemini', 'openrouter'];
 
 export function detectProvider(key) {
 
+    if (key.startsWith('sk-or-')) return 'openrouter';
     if (key.startsWith('sk-ant-')) return 'claude';
 
     if (key.startsWith('sk-')) return 'openai';
@@ -58,11 +59,11 @@ export async function keySettings(db, user, env, body) {
 
         const row = await db.collection('ai_keys').findOne({ _id: user._id });
 
-        const configured = providers.filter(p => row?.keys?.[p]);
+        const configured = providers.filter(p => row?.keys?.[p] || (p === 'openrouter' && env.OPENROUTER_API_KEY));
 
-        const masks = Object.fromEntries(configured.map(p => [p, `${decrypt(row.keys[p], env, user._id, p).slice(0, 3)}*****`]));
+        const masks = Object.fromEntries(configured.filter(p => row?.keys?.[p]).map(p => [p, `${decrypt(row.keys[p], env, user._id, p).slice(0, 3)}*****`]));
 
-        return { providers: configured, masks };
+        return { providers: configured, masks, ...(env.OPENROUTER_API_KEY && !row?.keys?.openrouter ? { sharedProviders: ['openrouter'] } : {}) };
 
     }
 
@@ -82,7 +83,7 @@ export async function keySettings(db, user, env, body) {
 
     const provider = remove === true ? body.provider : typeof key === 'string' ? detectProvider(key.trim()) : null;
 
-    if (!providers.includes(provider)) throw new HttpError(400, 'No se pudo identificar el proveedor. Usá una API key compatible de OpenAI, Claude o Gemini.');
+    if (!providers.includes(provider)) throw new HttpError(400, 'No se pudo identificar el proveedor. Usá una API key compatible de OpenAI, Claude, Gemini u OpenRouter.');
 
     if (body.expectedProvider && body.expectedProvider !== provider) throw new HttpError(400, 'La clave no corresponde al proveedor seleccionado.');
 
@@ -119,9 +120,8 @@ export async function marketChat(db, user, env, body) {
 
     const row = await db.collection('ai_keys').findOne({ _id: user._id });
 
-    if (!row?.keys?.[provider]) throw new HttpError(400, 'Agregá una API key para este proveedor.');
-
-    const key = decrypt(row.keys[provider], env, user._id, provider);
+    const key = row?.keys?.[provider] ? decrypt(row.keys[provider], env, user._id, provider) : provider === 'openrouter' ? env.OPENROUTER_API_KEY : null;
+    if (!key) throw new HttpError(400, 'Agregá una API key para este proveedor.');
 
     const names = Array.isArray(assets) ? assets.filter(x => typeof x === 'string').slice(0, 40).map(x => x.slice(0, 100)).join(', ') : '';
 
@@ -149,20 +149,27 @@ Escribí texto plano: no uses asteriscos, encabezados Markdown, tablas ni enlace
 
     let url, headers = { 'Content-Type': 'application/json' }, payload;
 
-    if (provider === 'openai') { url = 'https://api.openai.com/v1/responses'; headers.Authorization = `Bearer ${key}`; payload = { model: env.OPENAI_CHAT_MODEL || 'gpt-5-mini', instructions: system, input: modelMessages, tools: [{ type: 'web_search' }], store: false }; }
+    if (provider === 'openrouter') { url = 'https://openrouter.ai/api/v1/chat/completions'; headers.Authorization = `Bearer ${key}`; payload = { model: 'openrouter/free', messages: [{ role: 'system', content: `${system} No tenés búsqueda web en esta solicitud; no afirmes tener datos actuales ni inventes fuentes.` }, ...modelMessages] }; }
+    else if (provider === 'openai') { url = 'https://api.openai.com/v1/responses'; headers.Authorization = `Bearer ${key}`; payload = { model: env.OPENAI_CHAT_MODEL || 'gpt-5-mini', instructions: system, input: modelMessages, tools: [{ type: 'web_search' }], store: false }; }
 
     else if (provider === 'claude') { url = 'https://api.anthropic.com/v1/messages'; headers['x-api-key'] = key; headers['anthropic-version'] = '2023-06-01'; payload = { model: env.CLAUDE_CHAT_MODEL || 'claude-sonnet-4-6', max_tokens: 2048, system, messages: modelMessages, tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }] }; }
 
-    else { url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash')}:generateContent`; headers['x-goog-api-key'] = key; payload = { system_instruction: { parts: [{ text: system }] }, contents: modelMessages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })), tools: [{ google_search: {} }] }; }
+    else { url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_CHAT_MODEL || 'gemini-3.5-flash')}:generateContent`; headers['x-goog-api-key'] = key; payload = { system_instruction: { parts: [{ text: system }] }, contents: modelMessages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })), tools: [{ google_search: {} }] }; }
 
     let response;
 
     try { response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) }); } catch { throw new HttpError(503, 'No se pudo conectar con el proveedor de IA.'); }
 
     if (!response.ok) {
-        const label = { openai: 'OpenAI', claude: 'Claude', gemini: 'Gemini' }[provider];
+        const label = { openai: 'OpenAI', claude: 'Claude', gemini: 'Gemini', openrouter: 'OpenRouter' }[provider];
         if (response.status === 401 || response.status === 403) throw new HttpError(400, `${label} rechazó la API key o no tiene acceso al modelo.`);
-        if (response.status === 429) throw new HttpError(429, `${label} alcanzó un límite de uso o cuota. Revisá tu cuenta o intentá más tarde.`);
+        if (response.status === 429) {
+            const error = new HttpError(429, `${label} alcanzó un límite de uso o cuota.`, 'AI_RATE_LIMIT');
+            const retry = response.headers?.get('retry-after');
+            const seconds = retry && /^\d+$/.test(retry) ? Number(retry) : retry ? (Date.parse(retry) - Date.now()) / 1000 : NaN;
+            if (Number.isFinite(seconds) && seconds > 0 && seconds <= 604800) error.retryAfter = Math.ceil(seconds);
+            throw error;
+        }
         if (response.status === 404) throw new HttpError(503, `El modelo configurado de ${label} no está disponible. Revisá la configuración del servidor.`);
         if (response.status === 400 || response.status === 422) throw new HttpError(503, `${label} rechazó la solicitud. Probá una conversación nueva o revisá la configuración del modelo y la búsqueda web.`);
         throw new HttpError(503, `${label} no pudo responder (código ${response.status}). Intentá de nuevo más tarde.`);
@@ -170,7 +177,8 @@ Escribí texto plano: no uses asteriscos, encabezados Markdown, tablas ni enlace
 
     const data = await response.json(); let text = '', citations = [];
 
-    if (provider === 'openai') for (const item of data.output || []) for (const part of item.content || []) { if (part.type === 'output_text') { text += part.text; citations.push(...(part.annotations || []).filter(a => a.type === 'url_citation').map(a => ({ url: a.url, title: a.title }))); } }
+    if (provider === 'openrouter') text = data.choices?.[0]?.message?.content || '';
+    else if (provider === 'openai') for (const item of data.output || []) for (const part of item.content || []) { if (part.type === 'output_text') { text += part.text; citations.push(...(part.annotations || []).filter(a => a.type === 'url_citation').map(a => ({ url: a.url, title: a.title }))); } }
 
     else if (provider === 'claude') for (const part of data.content || []) { if (part.type === 'text') { text += part.text; citations.push(...(part.citations || []).filter(a => a.url).map(a => ({ url: a.url, title: a.title }))); } }
 

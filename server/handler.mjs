@@ -120,7 +120,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             if (method === 'GET') return reply(200, await readPortfolio(db, user._id));
             return reply(200, await writePortfolio(db, user._id, await jsonBody(req)));
         } catch (error) {
-            if (error instanceof HttpError) return reply(error.status, { error: error.message, code: error.code });
+            if (error instanceof HttpError) return reply(error.status, { error: error.message, code: error.code, ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}) });
             // No registrar cuerpos, cookies, PINs ni errores del driver que puedan incluir credenciales.
             return reply(503, { error: 'No se pudo completar la operación. Volvé a intentar.', code: 'UNAVAILABLE' });
         }

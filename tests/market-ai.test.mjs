@@ -62,3 +62,22 @@ test('guarda claves cifradas por usuario y permite eliminarlas', async () => {
     assert.deepEqual(await keySettings(db, user, env, { provider: 'openai', remove: true }), { providers: [], masks: {}, provider: 'openai' });
     await assert.rejects(keySettings(db, user, {}, { provider: 'openai', key }), /AI_ENCRYPTION_KEY/);
 });
+
+
+test('OpenRouter usa exclusivamente el selector gratuito y acepta una clave compartida', async () => {
+    const db = { collection: () => ({ findOne: async () => null }) };
+    const env = { OPENROUTER_API_KEY: 'sk-or-test-key' };
+    const user = { _id: 'user1' };
+    assert.equal(detectProvider('sk-or-test-key'), 'openrouter');
+    assert.deepEqual(await keySettings(db, user, env, null), { providers: ['openrouter'], masks: {}, sharedProviders: ['openrouter'] });
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url, options) => {
+            assert.equal(url, 'https://openrouter.ai/api/v1/chat/completions');
+            assert.equal(JSON.parse(options.body).model, 'openrouter/free');
+            return { ok: true, json: async () => ({ choices: [{ message: { content: 'Hola' } }] }) };
+        };
+        const result = await marketChat(db, user, env, { provider: 'openrouter', messages: [{ role: 'user', content: 'Hola' }] });
+        assert.equal(result.text, 'Hola');
+    } finally { globalThis.fetch = originalFetch; }
+});
