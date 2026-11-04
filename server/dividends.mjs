@@ -38,14 +38,14 @@ export async function portfolioDividends(portfolio, apiKey, fetcher = fetch) {
 export async function marketDividends(apiKey, fetcher = fetch, now = Date.now()) {
     if (!apiKey) return { configured: false, items: [], truncated: false };
     const today = new Date(now);
-    const from = new Date(now - 180 * 86400000).toISOString().slice(0, 10);
     const end = new Date(now + 28 * 86400000).toISOString().slice(0, 10);
     const start = today.toISOString().slice(0, 10);
-    let url = new URL('https://api.massive.com/stocks/v1/dividends');
-    url.searchParams.set('ex_dividend_date.gte', from);
-    url.searchParams.set('ex_dividend_date.lte', end);
-    url.searchParams.set('limit', '5000');
-    url.searchParams.set('sort', 'ex_dividend_date.desc');
+    let url = new URL('https://api.massive.com/v3/reference/dividends');
+    url.searchParams.set('pay_date.gte', start);
+    url.searchParams.set('pay_date.lte', end);
+    url.searchParams.set('limit', '1000');
+    url.searchParams.set('sort', 'pay_date');
+    url.searchParams.set('order', 'asc');
     const items = [];
     let pages = 0;
     while (url && pages++ < 10) {
@@ -53,14 +53,16 @@ export async function marketDividends(apiKey, fetcher = fetch, now = Date.now())
         const response = await fetcher(url, { signal: AbortSignal.timeout(15000) });
         if (!response.ok) throw new Error('Dividend provider unavailable');
         const data = await response.json();
-        if (!Array.isArray(data.results)) throw new Error('Invalid dividend response');
-        for (const event of data.results) {
+        if (data.results != null && !Array.isArray(data.results)) throw new Error('Invalid dividend response');
+        if (!Array.isArray(data.results) && data.status !== 'OK') throw new Error('Invalid dividend response');
+        for (const event of data.results ?? []) {
             if (typeof event.ticker !== 'string' || typeof event.pay_date !== 'string' || event.pay_date < start || event.pay_date > end || typeof event.cash_amount !== 'number' || !Number.isFinite(event.cash_amount) || event.cash_amount <= 0) continue;
             items.push({ ticker: event.ticker, payDate: event.pay_date, exDate: typeof event.ex_dividend_date === 'string' ? event.ex_dividend_date : null, amountPerShare: event.cash_amount, currency: typeof event.currency === 'string' ? event.currency : null });
         }
         if (data.next_url) {
             const next = new URL(data.next_url);
-            if (next.origin !== 'https://api.massive.com' || next.pathname !== '/stocks/v1/dividends') throw new Error('Invalid pagination URL');
+            if (!['api.massive.com', 'api.polygon.io'].includes(next.hostname) || next.protocol !== 'https:' || !next.pathname.startsWith('/v3/reference/dividends')) throw new Error('Invalid pagination URL');
+            next.hostname = 'api.massive.com';
             url = next;
         } else url = null;
     }
