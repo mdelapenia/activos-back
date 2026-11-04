@@ -8,7 +8,7 @@ import { readPortfolio, writePortfolio } from './portfolio.mjs';
 import { portfolioDividends, marketDividends } from './dividends.mjs';
 import { earningsCalendar } from './market-calendar.mjs';
 import { keySettings, marketChat } from './market-ai.mjs';
-import { stockQuotes } from './stock-quotes.mjs';
+import { stockQuotes, stockHistory } from './stock-quotes.mjs';
 
 const COOKIE = 'activos_session';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
@@ -66,7 +66,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
         try {
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
-            const allowed = { '/api/stocks/quotes': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
+            const allowed = { '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
             if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
             if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
@@ -110,6 +110,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 return reply(200, { ok: true });
             }
             const user = await requireUser(db, req, now);
+            if (path === '/api/stocks/history') return reply(200, await stockHistory((new URL(req.url, 'http://localhost').searchParams.get('symbol') || '').toUpperCase()));
             if (path === '/api/stocks/quotes') return reply(200, await stockQuotes((new URL(req.url, 'http://localhost').searchParams.get('symbols') || '').split(',')));
             if (path === '/api/imports/extract') return reply(200, await extractDocument(db, user, env, await jsonBody(req)));
             if (path === '/api/imports/gmail') return reply(200, method === 'GET' ? await gmailStatus(db, user, env) : await gmailDisconnect(db, user, env));
