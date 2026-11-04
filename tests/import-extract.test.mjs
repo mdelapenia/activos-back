@@ -1,38 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractDocument } from '../server/import-extract.mjs';
-import { keySettings } from '../server/market-ai.mjs';
+import { readFile } from 'node:fs/promises';
+import { extractDocument, parseAlpaca, parseLemon } from '../server/import-extract.mjs';
 
-test('el lector valida el contenido y envía el PDF para extraer operaciones sin modificar la cartera', async () => {
-    let document = null; let calls = 0;
-    const db = { collection(name) { assert.equal(name, 'ai_keys'); return { findOne: async () => document, updateOne: async (_, update) => { document = { keys: { openai: update.$set['keys.openai'] } }; } }; } };
-    const user = { _id: 'user-1' }, env = { AI_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64') };
-    await keySettings(db, user, env, { key: 'sk-test-example-key' });
-    const file = Buffer.from('%PDF-1.4\nexample').toString('base64');
-    const result = await extractDocument(db, user, env, { type: 'application/pdf', data: file }, async (_url, options) => {
-        calls++; const payload = JSON.parse(options.body);
-        assert.equal(payload.store, false); assert.equal(payload.input[0].content[0].type, 'input_file');
-        return { ok: true, json: async () => ({ output: [{ content: [{ type: 'output_text', text: '{"operations":[{"asset":"ITUB"}]}' }] }] }) };
-    });
-    assert.deepEqual(result.operations, [{ asset: 'ITUB' }]); assert.equal(calls, 1);
-    await assert.rejects(() => extractDocument(db, user, env, { type: 'image/png', data: file }), /contenido/);
+test('lee el PDF de ejemplo y agrupa las ejecuciones por orden', async () => {
+    const data = (await readFile(new URL('../../front/public/Resumen de operaciones 2026-11-02.pdf', import.meta.url))).toString('base64');
+    const { operations } = await extractDocument(null, null, null, { type:'application/pdf', data });
+    assert.deepEqual(operations.map(o => [o.asset, o.quantity, o.amount, o.executions.length]), [['SPY','0.046897527','35.65',1], ['ITUB','3.292978006','23.76',2]]);
 });
 
-test('usa las claves del chat y envía el archivo con el formato de cada proveedor', async () => {
-    const doc = { keys: {} };
-    const db = { collection: () => ({ findOne: async () => doc, updateOne: async (_, update) => { for (const [key, value] of Object.entries(update.$set)) doc.keys[key.split('.')[1]] = value; } }) };
-    const user = { _id: 'user-1' }, env = { AI_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'), OPENROUTER_API_KEY: 'shared-router-key' };
-    await keySettings(db, user, env, { key: 'sk-ant-example-key' });
-    await keySettings(db, user, env, { key: 'AIza-example-key' });
-    const file = Buffer.from('%PDF-1.4\nexample').toString('base64');
-    for (const [provider, host] of [['claude', 'api.anthropic.com'], ['gemini', 'generativelanguage.googleapis.com'], ['openrouter', 'openrouter.ai']]) {
-        const result = await extractDocument(db, user, env, { provider, type: 'application/pdf', data: file }, async (url, options) => {
-            assert.equal(new URL(url).host, host); const payload = JSON.parse(options.body);
-            if (provider === 'claude') { assert.equal(options.headers['x-api-key'], 'sk-ant-example-key'); assert.equal(payload.messages[0].content[0].type, 'document'); return { ok: true, json: async () => ({ content: [{ type: 'text', text: '{"operations":[]}' }] }) }; }
-            if (provider === 'gemini') { assert.equal(options.headers['x-goog-api-key'], 'AIza-example-key'); assert.equal(payload.contents[0].parts[0].inline_data.mime_type, 'application/pdf'); return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"operations":[]}' }] } }] }) }; }
-            assert.equal(options.headers.Authorization, 'Bearer shared-router-key'); assert.equal(payload.plugins[0].pdf.engine, 'cloudflare-ai'); return { ok: true, json: async () => ({ choices: [{ message: { content: '{"operations":[]}' } }] }) };
-        });
-        assert.deepEqual(result.operations, []);
-    }
-    await assert.rejects(() => extractDocument(db, user, env, { provider: 'invalid', type: 'application/pdf', data: file }), /Proveedor/);
+test('lee la captura de Lemon sin proveedor externo', async () => {
+    const data = (await readFile(new URL('../../front/public/screencapture-mail-google-com-mail-u-0-2026-11-04-10_08_43.png', import.meta.url))).toString('base64');
+    const { operations } = await extractDocument(null, null, null, { type:'image/png', data });
+    const op = operations[0];
+    assert.deepEqual([op.asset, op.date, op.quantity, op.amount, op.currency, op.price, op.fee], ['solana','2026-11-02','0.00151474','241.08','ARS','158357.03595','1.21']);
+    assert.equal(op.externalId, null);
+});
+
+test('ignora textos desconocidos y valida el formato declarado', async () => {
+    assert.deepEqual(parseAlpaca('posiciones SPY 100'), []);
+    assert.deepEqual(parseLemon('Compraste SOL'), []);
+    const data = Buffer.from('%PDF-1.4\nexample').toString('base64');
+    await assert.rejects(() => extractDocument(null, null, null, {type:'image/png', data}), /contenido/);
 });
