@@ -104,6 +104,14 @@ export async function keySettings(db, user, env, body) {
 
 }
 
+export async function getAiKey(db, user, env, provider) {
+    if (!providers.includes(provider)) throw new HttpError(400, 'Proveedor de IA inválido.');
+    const row = await db.collection('ai_keys').findOne({ _id: user._id });
+    const key = row?.keys?.[provider] ? decrypt(row.keys[provider], env, user._id, provider) : provider === 'openrouter' ? env.OPENROUTER_API_KEY : null;
+    if (!key) throw new HttpError(400, 'Agregá una API key para este proveedor en la configuración del chat.');
+    return key;
+}
+
 export async function marketChat(db, user, env, body) {
 
     const { provider, messages, assets } = body || {};
@@ -119,10 +127,7 @@ export async function marketChat(db, user, env, body) {
         else modelMessages.push({ role: message.role, content: message.content });
     }
 
-    const row = await db.collection('ai_keys').findOne({ _id: user._id });
-
-    const key = row?.keys?.[provider] ? decrypt(row.keys[provider], env, user._id, provider) : provider === 'openrouter' ? env.OPENROUTER_API_KEY : null;
-    if (!key) throw new HttpError(400, 'Agregá una API key para este proveedor.');
+    const key = await getAiKey(db, user, env, provider);
 
     const names = Array.isArray(assets) ? assets.filter(x => typeof x === 'string').slice(0, 40).map(x => x.slice(0, 100)).join(', ') : '';
 
