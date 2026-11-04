@@ -33,3 +33,37 @@ export async function portfolioDividends(portfolio, apiKey, fetcher = fetch) {
     }));
     return { configured: true, items };
 }
+
+// Massive cubre principalmente valores de EE. UU.; no representa todas las bolsas del mundo.
+export async function marketDividends(apiKey, fetcher = fetch, now = Date.now()) {
+    if (!apiKey) return { configured: false, items: [], truncated: false };
+    const today = new Date(now);
+    const from = new Date(now - 180 * 86400000).toISOString().slice(0, 10);
+    const end = new Date(now + 28 * 86400000).toISOString().slice(0, 10);
+    const start = today.toISOString().slice(0, 10);
+    let url = new URL('https://api.massive.com/stocks/v1/dividends');
+    url.searchParams.set('ex_dividend_date.gte', from);
+    url.searchParams.set('ex_dividend_date.lte', end);
+    url.searchParams.set('limit', '5000');
+    url.searchParams.set('sort', 'ex_dividend_date.desc');
+    const items = [];
+    let pages = 0;
+    while (url && pages++ < 10) {
+        url.searchParams.set('apiKey', apiKey);
+        const response = await fetcher(url, { signal: AbortSignal.timeout(15000) });
+        if (!response.ok) throw new Error('Dividend provider unavailable');
+        const data = await response.json();
+        if (!Array.isArray(data.results)) throw new Error('Invalid dividend response');
+        for (const event of data.results) {
+            if (typeof event.ticker !== 'string' || typeof event.pay_date !== 'string' || event.pay_date < start || event.pay_date > end || typeof event.cash_amount !== 'number' || !Number.isFinite(event.cash_amount) || event.cash_amount <= 0) continue;
+            items.push({ ticker: event.ticker, payDate: event.pay_date, exDate: typeof event.ex_dividend_date === 'string' ? event.ex_dividend_date : null, amountPerShare: event.cash_amount, currency: typeof event.currency === 'string' ? event.currency : null });
+        }
+        if (data.next_url) {
+            const next = new URL(data.next_url);
+            if (next.origin !== 'https://api.massive.com' || next.pathname !== '/stocks/v1/dividends') throw new Error('Invalid pagination URL');
+            url = next;
+        } else url = null;
+    }
+    items.sort((a, b) => a.payDate.localeCompare(b.payDate) || a.ticker.localeCompare(b.ticker));
+    return { configured: true, items, truncated: Boolean(url), start, end };
+}
