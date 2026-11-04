@@ -33,3 +33,13 @@ test('incluye dividendos de ETF de índices registrados como CEDEARs', async () 
     assert.equal(items[0].events[0].estimatedGross, 2);
     assert.equal(items[1].events[0].estimatedGross, 6);
 });
+
+test('incluye acciones y SPY sin ratios de CEDEAR y calcula unidades fraccionarias', async () => {
+    const investments = ['SPY', 'AAPL'].map((coin, index) => ({ id: String(index), name: coin, kind: 'stock', coin, units: 0.5, date: '2025-01-01' }));
+    const symbols = [];
+    const fetcher = async url => { symbols.push(url.searchParams.get('ticker')); return { ok: true, json: async () => ({ results: [{ pay_date: '2099-02-01', ex_dividend_date: '2099-01-03', cash_amount: 2, currency: 'USD' }] }) }; };
+    const { items } = await portfolioDividends({ investments }, 'secret', fetcher);
+    assert.deepEqual(symbols.sort(), ['AAPL', 'SPY']);
+    assert.equal(items[0].events[0].estimatedGross, 1);
+    assert.equal(items[0].kind, 'stock');
+});

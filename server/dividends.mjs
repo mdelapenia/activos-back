@@ -2,18 +2,21 @@ const RATIOS_URL = 'https://ferminrp.github.io/google-sheets-argento/api/cedears
 
 export async function portfolioDividends(portfolio, apiKey, fetcher = fetch) {
     if (!apiKey) return { configured: false, items: [] };
-    const positions = portfolio.investments.filter(item => item.kind === 'cedear' && item.coin && item.units > 0);
+    const positions = portfolio.investments.filter(item => (item.kind === 'cedear' || item.kind === 'stock') && item.coin && item.units > 0);
     if (!positions.length) return { configured: true, items: [] };
-    const response = await fetcher(RATIOS_URL, { signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error('Ratios unavailable');
-    const ratios = await response.json();
-    if (!Array.isArray(ratios.items)) throw new Error('Invalid ratios');
+    let ratios = { items: [] };
+    if (positions.some(position => position.kind === 'cedear')) {
+        try {
+            const response = await fetcher(RATIOS_URL, { signal: AbortSignal.timeout(15000) });
+            if (response.ok) { const data = await response.json(); if (Array.isArray(data.items)) ratios = data; }
+        } catch { /* Las acciones no dependen de los ratios de CEDEAR. */ }
+    }
     const today = new Date().toISOString().slice(0, 10);
     const items = await Promise.all(positions.map(async position => {
         const entry = ratios.items.find(row => String(row.Cedears).toUpperCase() === position.coin.toUpperCase());
-        const ratio = Number(entry?.Ratio);
-        const symbol = entry?.TickerOriginal;
-        const base = { id: position.id, name: position.name, ticker: position.coin, units: position.units, purchaseDate: position.date };
+        const ratio = position.kind === 'stock' ? 1 : Number(entry?.Ratio);
+        const symbol = position.kind === 'stock' ? position.coin.toUpperCase() : entry?.TickerOriginal;
+        const base = { id: position.id, name: position.name, ticker: position.coin, kind: position.kind, units: position.units, purchaseDate: position.date };
         if (!Number.isFinite(ratio) || ratio <= 0 || typeof symbol !== 'string' || !/^[A-Za-z0-9.-]{1,20}$/.test(symbol)) return { ...base, status: 'missing_ratio' };
         try {
             const url = new URL('https://api.massive.com/stocks/v1/dividends');
