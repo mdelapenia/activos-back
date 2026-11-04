@@ -12,3 +12,14 @@ test('conserva ventas y preferencias del panel, y rechaza valores inválidos', (
     assert.throws(() => validatePortfolio({ ...portfolio, preferences: { ...portfolio.preferences, panels: ['unknown'] } }));
     assert.throws(() => validatePortfolio({ ...portfolio, sales: [{ ...portfolio.sales[0], date: '2026-02-30' }] }));
 });
+
+test('acciones se guardan en USD y se conservan CEDEARs anteriores en USD', () => {
+    const portfolio = emptyPortfolio();
+    portfolio.investments = [
+        { id: 'stock', name: 'Apple', kind: 'stock', coin: 'AAPL', units: 1, amount: 200, currency: 'USD', date: '2026-01-01' },
+        { id: 'legacy', name: 'CEDEAR anterior', kind: 'cedear', coin: 'AAPL', units: 1, amount: 10, currency: 'USD', date: '2026-01-01' },
+    ];
+    assert.deepEqual(validatePortfolio(portfolio).investments, portfolio.investments);
+    portfolio.investments[0].currency = 'ARS';
+    assert.throws(() => validatePortfolio(portfolio));
+});
