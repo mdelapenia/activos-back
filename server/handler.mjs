@@ -4,6 +4,7 @@ import { getDatabase } from './database.mjs';
 import { digest, hashPin, HttpError, newToken, normalizeEmail, validEmail, validPin, verifyPin } from './security.mjs';
 import { readPortfolio, writePortfolio } from './portfolio.mjs';
 import { portfolioDividends, marketDividends } from './dividends.mjs';
+import { earningsCalendar } from './market-calendar.mjs';
 import { keySettings, marketChat } from './market-ai.mjs';
 
 const COOKIE = 'activos_session';
@@ -62,7 +63,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
         try {
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
-            const allowed = { '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
+            const allowed = { '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
             if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
             if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
@@ -116,6 +117,11 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             }
             if (path === '/api/inflation/us') return reply(200, await usInflation(now));
             if (path === '/api/session') return reply(200, { user: { id: user._id.toString(), email: user.email }, ...await readPortfolio(db, user._id) });
+            if (path === '/api/market-calendar/earnings') {
+                const date = new URL(req.url, 'http://localhost').searchParams.get('date') ?? '';
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) throw new HttpError(400, 'Fecha inválida.');
+                return reply(200, await earningsCalendar(date));
+            }
             if (path === '/api/dividends/market') return reply(200, await marketDividends(env.MASSIVE_API_KEY, fetch, now));
             if (path === '/api/dividends') return reply(200, await portfolioDividends((await readPortfolio(db, user._id)).portfolio, env.MASSIVE_API_KEY));
             if (method === 'GET') return reply(200, await readPortfolio(db, user._id));
