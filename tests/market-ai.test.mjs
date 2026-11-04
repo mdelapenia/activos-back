@@ -26,6 +26,8 @@ test('el asistente pide investigar y construir escenarios sin inventar cotizacio
         assert.match(payload.system_instruction.parts[0].text, /sin inventar cifras/);
         assert.match(payload.system_instruction.parts[0].text, /menos de 35 palabras/);
         assert.match(payload.system_instruction.parts[0].text, /no afirmes que existe concentración/);
+        assert.match(payload.system_instruction.parts[0].text, /horizonte \(corto, medio o largo plazo\)/);
+        assert.match(payload.system_instruction.parts[0].text, /No hagas un cuestionario para consultas informativas simples/);
         assert.deepEqual(payload.tools, [{ google_search: {} }]);
         await marketChat(db, user, env, { provider: 'gemini', messages: [{ role: 'user', content: 'Predicción de ITUB' }, { role: 'assistant', content: 'No realizo predicciones de precios.' }, { role: 'user', content: 'Dame una predicción de ITUB a un año' }], assets: ['ITUB'] });
         assert.equal(payload.contents.length, 1);
