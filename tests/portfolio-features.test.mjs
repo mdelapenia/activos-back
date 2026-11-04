@@ -43,3 +43,13 @@ test('conserva alertas y rechaza configuraciones inválidas', () => {
     assert.throws(() => validatePortfolio({ ...portfolio, alerts: [{ ...portfolio.alerts[1], date: '2026-02-30' }] }));
     assert.throws(() => validatePortfolio({ ...portfolio, alerts: [{ ...portfolio.alerts[0], threshold: -1 }] }));
 });
+
+test('conserva precio ejecutado, unidades y comisión de una venta', () => {
+    const portfolio = emptyPortfolio();
+    const sale = { id: 'sale', name: 'Apple', date: '2026-01-01', fraction: 0.5, proceeds: 98, currency: 'USD', cost: 80, costCurrency: 'USD', executionPrice: 50, units: 2, fee: 2 };
+    portfolio.sales = [sale];
+    assert.deepEqual(validatePortfolio(portfolio).sales, [sale]);
+    assert.throws(() => validatePortfolio({ ...portfolio, sales: [{ ...sale, fee: -1 }] }));
+    assert.throws(() => validatePortfolio({ ...portfolio, sales: [{ ...sale, executionPrice: 0 }] }));
+    assert.throws(() => validatePortfolio({ ...portfolio, sales: [{ ...sale, units: 0 }] }));
+});
