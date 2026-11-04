@@ -23,7 +23,12 @@ export function validatePortfolio(raw) {
         const item = { id: i.id, name: i.name.trim(), amount: i.amount, currency: i.currency, date: i.date, kind: i.kind };
         if (i.kind === 'rate') {
             if (typeof i.rate !== 'number' || !Number.isFinite(i.rate) || i.rate <= -100 || !['month', 'year'].includes(i.period)) return invalid();
-            return { ...item, rate: i.rate, period: i.period };
+            if (i.maturityDate != null) {
+                if (i.rate < 0 || i.period !== 'year' || typeof i.maturityDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(i.maturityDate)) return invalid();
+                const maturity = new Date(`${i.maturityDate}T12:00:00Z`);
+                if (!Number.isFinite(maturity.getTime()) || maturity.toISOString().slice(0, 10) !== i.maturityDate || i.maturityDate <= i.date) return invalid();
+            }
+            return { ...item, rate: i.rate, period: i.period, ...(i.maturityDate == null ? {} : { maturityDate: i.maturityDate }) };
         }
         if (!text(i.coin, 150) || !positive(i.units)) return invalid();
         if ((i.purchasePrice != null && !positive(i.purchasePrice)) || (i.purchaseFx != null && !positive(i.purchaseFx))) return invalid();

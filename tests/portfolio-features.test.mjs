@@ -61,3 +61,12 @@ test('guarda objetivos de distribución y valida que sumen 100', () => {
     assert.throws(() => validatePortfolio({ ...portfolio, preferences: { ...portfolio.preferences, allocationTargets: { ...portfolio.preferences.allocationTargets, crypto: 29 } } }));
     assert.throws(() => validatePortfolio({ ...portfolio, preferences: { ...portfolio.preferences, allocationTargets: { ...portfolio.preferences.allocationTargets, crypto: -1 } } }));
 });
+
+test('conserva el vencimiento de un plazo fijo con tasa anual', () => {
+    const portfolio = emptyPortfolio();
+    portfolio.investments = [{ id: 'deposit', name: 'Plazo fijo', kind: 'rate', amount: 100000, currency: 'ARS', date: '2026-01-01', rate: 30, period: 'year', maturityDate: '2026-02-01' }];
+    assert.deepEqual(validatePortfolio(portfolio).investments, portfolio.investments);
+    assert.throws(() => validatePortfolio({ ...portfolio, investments: [{ ...portfolio.investments[0], maturityDate: '2025-12-31' }] }));
+    assert.throws(() => validatePortfolio({ ...portfolio, investments: [{ ...portfolio.investments[0], period: 'month' }] }));
+    assert.throws(() => validatePortfolio({ ...portfolio, investments: [{ ...portfolio.investments[0], rate: -1 }] }));
+});
