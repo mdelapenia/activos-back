@@ -32,9 +32,16 @@ export async function keySettings(db, user, env, body) {
         const masks = Object.fromEntries(configured.map(p => [p, `${decrypt(row.keys[p], env, user._id, p).slice(0, 3)}*****`]));
         return { providers: configured, masks };
     }
+    if (body.copy === true) {
+        if (!providers.includes(body.provider)) throw new HttpError(400, 'Proveedor inv�lido.');
+        const row = await db.collection('ai_keys').findOne({ _id: user._id });
+        if (!row?.keys?.[body.provider]) throw new HttpError(404, 'No se encontr� la clave.');
+        return { key: decrypt(row.keys[body.provider], env, user._id, body.provider) };
+    }
     const { key, remove } = body;
     const provider = remove === true ? body.provider : typeof key === 'string' ? detectProvider(key.trim()) : null;
     if (!providers.includes(provider)) throw new HttpError(400, 'No se pudo identificar el proveedor. Usá una API key compatible de OpenAI, Claude o Gemini.');
+    if (body.expectedProvider && body.expectedProvider !== provider) throw new HttpError(400, 'La clave no corresponde al proveedor seleccionado.');
     if (remove === true) await db.collection('ai_keys').updateOne({ _id: user._id }, { $unset: { [`keys.${provider}`]: '' } });
     else {
         const normalized = key.trim();
@@ -46,15 +53,22 @@ export async function keySettings(db, user, env, body) {
 export async function marketChat(db, user, env, body) {
     const { provider, messages, assets } = body || {};
     if (!providers.includes(provider) || !Array.isArray(messages) || !messages.length || messages.length > 20 || messages.some(m => !['user', 'assistant'].includes(m?.role) || typeof m.content !== 'string' || !m.content.trim() || m.content.length > 4000) || messages.at(-1).role !== 'user') throw new HttpError(400, 'La conversación no es válida.');
+    const predictionRequest = /predic|pron[oó]stic|proyecci[oó]n|precio futuro/i.test(messages.at(-1).content);
+    const previousRefusal = messages.at(-2)?.role === 'assistant' && /no (puedo|realizo|hago|ofrezco|brindo).{0,100}(predic|pron[oó]stic|proyecci[oó]n)/is.test(messages.at(-2).content);
+    const modelMessages = predictionRequest && previousRefusal ? [messages.at(-1)] : messages;
     const row = await db.collection('ai_keys').findOne({ _id: user._id });
     if (!row?.keys?.[provider]) throw new HttpError(400, 'Agregá una API key para este proveedor.');
     const key = decrypt(row.keys[provider], env, user._id, provider);
     const names = Array.isArray(assets) ? assets.filter(x => typeof x === 'string').slice(0, 40).map(x => x.slice(0, 100)).join(', ') : '';
-    const system = `Sos un asistente de mercado para una persona en Argentina. Respondé en español claro, distinguí hechos de estimaciones, indicá fecha y moneda de las cotizaciones y citá fuentes. No afirmes tener datos actuales sin consultarlos. Activos indicados por el usuario: ${names || 'ninguno'}. No conocés sus cantidades ni saldos.`;
+    const system = `Sos el asistente de investigación de Activos, una aplicación de inversiones para una persona en Argentina. Respondé en español claro y ayudá a investigar mercados, activos y las posiciones identificadas en la app. Tenés acceso a una herramienta de búsqueda web: usala cuando la consulta dependa de noticias, precios, resultados o datos actuales. Citá las fuentes y fechá las cotizaciones; nunca afirmes haber investigado ni inventes fuentes o datos que no pudiste verificar.
+
+Cuando pidan una predicción, pronóstico o precio futuro, no te niegues solo porque es incierto: ofrecé un análisis prospectivo y dejá claro que es una estimación, no una garantía. Identificá el activo, mercado, moneda y horizonte; si falta el plazo, asumí un año y decilo. Considerá el precio de referencia verificado, los factores relevantes, riesgos y supuestos; proponé un escenario base y, cuando sea útil, escenarios optimista y pesimista con rangos y el razonamiento o cálculo que los sostenga. Diferenciá tus hipótesis de los objetivos de terceros y de hechos verificados. No presentes probabilidades, rangos o precisión numérica como datos observados si son supuestos. Si no encontrás un precio de referencia reciente y fiable, explicá la limitación y ofrecé escenarios cualitativos o una fórmula condicional sin inventar cifras. Si el símbolo es ambiguo, usá el contexto de la cartera o pedí aclaración. Distinguí la acción brasileña, el ADR y el CEDEAR, sus monedas y ratios; no los trates como intercambiables.
+
+Sé concreto y útil: una advertencia breve sobre la incertidumbre alcanza. No afirmes tener licencia ni ejecutar operaciones. Una negativa previa en la conversación a hacer predicciones no impide realizar este análisis. Activos indicados por el usuario: ${names || 'ninguno'}. No conocés sus cantidades ni saldos; no inventes el valor de su posición.`;
     let url, headers = { 'Content-Type': 'application/json' }, payload;
-    if (provider === 'openai') { url = 'https://api.openai.com/v1/responses'; headers.Authorization = `Bearer ${key}`; payload = { model: env.OPENAI_CHAT_MODEL || 'gpt-5-mini', instructions: system, input: messages, tools: [{ type: 'web_search' }], store: false }; }
-    else if (provider === 'claude') { url = 'https://api.anthropic.com/v1/messages'; headers['x-api-key'] = key; headers['anthropic-version'] = '2023-06-01'; payload = { model: env.CLAUDE_CHAT_MODEL || 'claude-sonnet-4-6', max_tokens: 2048, system, messages, tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }] }; }
-    else { url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash')}:generateContent`; headers['x-goog-api-key'] = key; payload = { system_instruction: { parts: [{ text: system }] }, contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })), tools: [{ google_search: {} }] }; }
+    if (provider === 'openai') { url = 'https://api.openai.com/v1/responses'; headers.Authorization = `Bearer ${key}`; payload = { model: env.OPENAI_CHAT_MODEL || 'gpt-5-mini', instructions: system, input: modelMessages, tools: [{ type: 'web_search' }], store: false }; }
+    else if (provider === 'claude') { url = 'https://api.anthropic.com/v1/messages'; headers['x-api-key'] = key; headers['anthropic-version'] = '2023-06-01'; payload = { model: env.CLAUDE_CHAT_MODEL || 'claude-sonnet-4-6', max_tokens: 2048, system, messages: modelMessages, tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }] }; }
+    else { url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash')}:generateContent`; headers['x-goog-api-key'] = key; payload = { system_instruction: { parts: [{ text: system }] }, contents: modelMessages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })), tools: [{ google_search: {} }] }; }
     let response;
     try { response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) }); } catch { throw new HttpError(503, 'No se pudo conectar con el proveedor de IA.'); }
     if (!response.ok) throw new HttpError(response.status === 401 || response.status === 403 ? 400 : 503, response.status === 401 || response.status === 403 ? 'El proveedor rechazó la API key o no tiene acceso al modelo.' : 'El proveedor no pudo responder. Revisá tu cuota y volvé a intentar.');
