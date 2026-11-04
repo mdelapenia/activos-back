@@ -53,3 +53,11 @@ test('conserva precio ejecutado, unidades y comisión de una venta', () => {
     assert.throws(() => validatePortfolio({ ...portfolio, sales: [{ ...sale, executionPrice: 0 }] }));
     assert.throws(() => validatePortfolio({ ...portfolio, sales: [{ ...sale, units: 0 }] }));
 });
+
+test('guarda objetivos de distribución y valida que sumen 100', () => {
+    const portfolio = emptyPortfolio();
+    portfolio.preferences.allocationTargets = { rate: 30, cedear: 40, index: 0, stock: 0, crypto: 30 };
+    assert.deepEqual(validatePortfolio(portfolio).preferences.allocationTargets, portfolio.preferences.allocationTargets);
+    assert.throws(() => validatePortfolio({ ...portfolio, preferences: { ...portfolio.preferences, allocationTargets: { ...portfolio.preferences.allocationTargets, crypto: 29 } } }));
+    assert.throws(() => validatePortfolio({ ...portfolio, preferences: { ...portfolio.preferences, allocationTargets: { ...portfolio.preferences.allocationTargets, crypto: -1 } } }));
+});
