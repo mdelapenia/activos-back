@@ -45,13 +45,23 @@ export function validatePortfolio(raw) {
         importIds.add(op.id);
         if (importFields.some(field => typeof op[field] !== 'string' || op[field].length > (field === 'executions' ? 20000 : 300))) return invalid();
     }
+    const alerts = raw.alerts ?? [];
+    if (!Array.isArray(alerts) || alerts.length > 200) return invalid();
+    const alertIds = new Set();
+    for (const a of alerts) {
+        if (!a || !text(a.id, 128) || alertIds.has(a.id) || !['price', 'variation', 'concentration', 'dividend', 'maturity'].includes(a.kind) || !['cedear', 'stock', 'crypto'].includes(a.assetKind) || !text(a.assetId, 150) || !text(a.assetName, 150) || !['above', 'below'].includes(a.direction) || typeof a.threshold !== 'number' || !Number.isFinite(a.threshold) || a.threshold <= 0 || a.threshold > 1e15 || typeof a.date !== 'string') return invalid();
+        if (['concentration', 'dividend', 'maturity'].includes(a.kind) && a.threshold > 100) return invalid();
+        if (a.kind === 'maturity') { const date = new Date(`${a.date}T12:00:00Z`); if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== a.date) return invalid(); }
+        else if (a.date !== '') return invalid();
+        alertIds.add(a.id);
+    }
     const p = raw.preferences;
     if (!p || !['dark', 'light', 'system'].includes(p.theme) || !['USD', 'ARS'].includes(p.display)
         || !['bolsa', 'contadoconliqui', 'blue', 'oficial', 'mayorista', 'cripto', 'tarjeta'].includes(p.dollar)
         || typeof p.hidden !== 'boolean' || typeof p.sidebarCollapsed !== 'boolean' || ![0, 12, 36, 60].includes(p.horizon)) return invalid();
     if ((p.showChatButton !== undefined && typeof p.showChatButton !== 'boolean') || (p.showQuotesBar !== undefined && typeof p.showQuotesBar !== 'boolean')) return invalid();
     if (p.panels !== undefined && (!Array.isArray(p.panels) || p.panels.some(x => !['value', 'evolution', 'distribution', 'investments', 'inflation', 'macro', 'streak', 'panel-v2'].includes(x)))) return invalid();
-    return { investments, ...(raw.imports === undefined ? {} : { imports: imports.map(op => ({ id: op.id, status: op.status, ...Object.fromEntries(importFields.map(field => [field, op[field]])) })) }), ...(raw.sales === undefined ? {} : { sales: sales.map(({ id, name, date, fraction, proceeds, currency, cost, costCurrency }) => ({ id, name, date, fraction, proceeds, currency, cost, costCurrency })) }), preferences: { theme: p.theme, display: p.display, dollar: p.dollar, hidden: p.hidden, sidebarCollapsed: p.sidebarCollapsed, horizon: p.horizon, ...(p.panels === undefined ? {} : { panels: p.panels }), ...(p.showChatButton === undefined ? {} : { showChatButton: p.showChatButton }), ...(p.showQuotesBar === undefined ? {} : { showQuotesBar: p.showQuotesBar }) } };
+    return { investments, ...(raw.alerts === undefined ? {} : { alerts: alerts.map(({ id, kind, assetKind, assetId, assetName, threshold, direction, date }) => ({ id, kind, assetKind, assetId, assetName, threshold, direction, date })) }), ...(raw.imports === undefined ? {} : { imports: imports.map(op => ({ id: op.id, status: op.status, ...Object.fromEntries(importFields.map(field => [field, op[field]])) })) }), ...(raw.sales === undefined ? {} : { sales: sales.map(({ id, name, date, fraction, proceeds, currency, cost, costCurrency }) => ({ id, name, date, fraction, proceeds, currency, cost, costCurrency })) }), preferences: { theme: p.theme, display: p.display, dollar: p.dollar, hidden: p.hidden, sidebarCollapsed: p.sidebarCollapsed, horizon: p.horizon, ...(p.panels === undefined ? {} : { panels: p.panels }), ...(p.showChatButton === undefined ? {} : { showChatButton: p.showChatButton }), ...(p.showQuotesBar === undefined ? {} : { showQuotesBar: p.showQuotesBar }) } };
 }
 
 export async function readPortfolio(db, userId) {

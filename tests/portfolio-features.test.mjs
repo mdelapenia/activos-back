@@ -31,3 +31,15 @@ test('conserva operaciones importadas junto a la cartera y rechaza IDs repetidos
     portfolio.imports.push({ ...portfolio.imports[0] });
     assert.throws(() => validatePortfolio(portfolio));
 });
+
+test('conserva alertas y rechaza configuraciones inválidas', () => {
+    const portfolio = emptyPortfolio();
+    portfolio.alerts = [
+        { id: 'price', kind: 'price', assetKind: 'crypto', assetId: 'bitcoin', assetName: 'Bitcoin', threshold: 100000, direction: 'above', date: '' },
+        { id: 'maturity', kind: 'maturity', assetKind: 'stock', assetId: 'AAPL', assetName: 'Apple', threshold: 7, direction: 'above', date: '2026-12-15' },
+    ];
+    assert.deepEqual(validatePortfolio(portfolio).alerts, portfolio.alerts);
+    assert.throws(() => validatePortfolio({ ...portfolio, alerts: [...portfolio.alerts, portfolio.alerts[0]] }));
+    assert.throws(() => validatePortfolio({ ...portfolio, alerts: [{ ...portfolio.alerts[1], date: '2026-02-30' }] }));
+    assert.throws(() => validatePortfolio({ ...portfolio, alerts: [{ ...portfolio.alerts[0], threshold: -1 }] }));
+});
