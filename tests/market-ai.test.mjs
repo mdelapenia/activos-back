@@ -38,6 +38,8 @@ test('el asistente pide investigar y construir escenarios sin inventar cotizacio
         assert.match(payload.system_instruction.parts[0].text, /exactamente una pregunta breve por mensaje/);
         assert.match(payload.system_instruction.parts[0].text, /máximo 90 palabras/);
         assert.match(payload.system_instruction.parts[0].text, /pérdidas pueden superar el porcentaje tolerado/);
+        assert.match(payload.system_instruction.parts[0].text, /no consideres los activos existentes como recomendaciones/);
+        assert.match(payload.system_instruction.parts[0].text, /preguntá cuántos meses o años/);
         assert.match(payload.system_instruction.parts[0].text, /saltá las preguntas ya respondidas/);
         await marketChat(db, user, env, { provider: 'gemini', messages: [{ role: 'assistant', content: 'Mensaje anterior' }, { role: 'user', content: 'Primera consulta' }, { role: 'user', content: 'Reintento' }], assets: [] });
         assert.equal(payload.contents.length, 1);
@@ -77,6 +79,7 @@ test('OpenRouter usa exclusivamente el selector gratuito y acepta una clave comp
     const originalFetch = globalThis.fetch;
     try {
         globalThis.fetch = async (url, options) => {
+            if (url !== 'https://openrouter.ai/api/v1/chat/completions') return { ok: false };
             assert.equal(url, 'https://openrouter.ai/api/v1/chat/completions');
             assert.equal(JSON.parse(options.body).model, 'openrouter/free');
             return { ok: true, json: async () => ({ choices: [{ message: { content: 'Hola' } }] }) };
@@ -91,11 +94,11 @@ test('OpenRouter reintenta si el modelo devuelve una llamada interna en vez de u
     const db = { collection: () => ({ findOne: async () => null }) };
     const originalFetch = globalThis.fetch; let calls = 0;
     try {
-        globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: ++calls === 1 ? "<|tool_call_start|>[google(query='QQQ')]<|tool_call_end|>" : 'Podés considerar una cartera diversificada.' } }] }) });
+        globalThis.fetch = async url => url !== 'https://openrouter.ai/api/v1/chat/completions' ? { ok: false } : ({ ok: true, json: async () => ({ choices: [{ message: { content: ++calls === 1 ? "<|tool_call_start|>[google(query='QQQ')]<|tool_call_end|>" : 'Podés considerar una cartera diversificada.' } }] }) });
         const result = await marketChat(db, { _id: 'u' }, { OPENROUTER_API_KEY: 'sk-or-test' }, { provider: 'openrouter', messages: [{ role: 'user', content: '¿Cómo invierto?' }] });
         assert.equal(calls, 2);
         assert.equal(result.text, 'Podés considerar una cartera diversificada.');
-        globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '<|tool_call_start|>google()<|tool_call_end|>' } }] }) });
+        globalThis.fetch = async url => url !== 'https://openrouter.ai/api/v1/chat/completions' ? { ok: false } : ({ ok: true, json: async () => ({ choices: [{ message: { content: '<|tool_call_start|>google()<|tool_call_end|>' } }] }) });
         await assert.rejects(marketChat(db, { _id: 'u' }, { OPENROUTER_API_KEY: 'sk-or-test' }, { provider: 'openrouter', messages: [{ role: 'user', content: '¿Cómo invierto?' }] }), /respuesta válida/);
     } finally { globalThis.fetch = originalFetch; }
 });
@@ -105,9 +108,28 @@ test('OpenRouter intenta resumir una recomendación de inversión extensa', asyn
     const db = { collection: () => ({ findOne: async () => null }) };
     const originalFetch = globalThis.fetch; let calls = 0;
     try {
-        globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: ++calls === 1 ? 'Detalle '.repeat(160) : 'Dos opciones, con sus riesgos.' } }] }) });
+        globalThis.fetch = async url => url !== 'https://openrouter.ai/api/v1/chat/completions' ? { ok: false } : ({ ok: true, json: async () => ({ choices: [{ message: { content: ++calls === 1 ? 'Detalle '.repeat(160) : 'Dos opciones, con sus riesgos.' } }] }) });
         const result = await marketChat(db, { _id: 'u' }, { OPENROUTER_API_KEY: 'sk-or-test' }, { provider: 'openrouter', messages: [{ role: 'user', content: 'Quiero invertir' }] });
         assert.equal(calls, 2);
         assert.equal(result.text, 'Dos opciones, con sus riesgos.');
+    } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test('las cotizaciones disponibles llegan al modelo y conservan su fuente y fecha', async () => {
+    const db = { collection: () => ({ findOne: async () => null }) }, originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url, options) => {
+            if (url.includes('data912')) return { ok: true, json: async () => [{ symbol: 'QQQ', c: 12000 }] };
+            if (url.includes('dolarapi')) return { ok: true, json: async () => [{ casa: 'blue', venta: 1400, fechaActualizacion: '2026-01-01T12:00:00Z' }] };
+            if (url.includes('coingecko')) return { ok: false };
+            const system = JSON.parse(options.body).messages[0].content;
+            assert.match(system, /QQQ: 12000 ARS por CEDEAR/);
+            assert.match(system, /fecha de cotización no informada/);
+            assert.match(system, /Dólar blue: 1400 ARS/);
+            return { ok: true, json: async () => ({ choices: [{ message: { content: 'QQQ: 12000 ARS.' } }] }) };
+        };
+        const result = await marketChat(db, { _id: 'u' }, { OPENROUTER_API_KEY: 'sk-or-test' }, { provider: 'openrouter', messages: [{ role: 'user', content: 'Precio QQQ' }] });
+        assert.equal(result.citations.length, 2);
     } finally { globalThis.fetch = originalFetch; }
 });
