@@ -35,6 +35,11 @@ test('el asistente pide investigar y construir escenarios sin inventar cotizacio
         assert.match(payload.contents[2].parts[0].text, /un año/);
         assert.match(payload.system_instruction.parts[0].text, /Usá el contexto de la conversación reciente/);
         assert.match(payload.system_instruction.parts[0].text, /no afirmes que lo hiciste/);
+        await marketChat(db, user, env, { provider: 'gemini', messages: [{ role: 'assistant', content: 'Mensaje anterior' }, { role: 'user', content: 'Primera consulta' }, { role: 'user', content: 'Reintento' }], assets: [] });
+        assert.equal(payload.contents.length, 1);
+        assert.match(payload.contents[0].parts[0].text, /Primera consulta[\s\S]*Reintento/);
+        globalThis.fetch = async () => ({ ok: false, status: 429 });
+        await assert.rejects(marketChat(db, user, env, { provider: 'gemini', messages: [{ role: 'user', content: 'QQQ' }] }), /Gemini alcanzó un límite/);
     } finally { globalThis.fetch = originalFetch; }
 });
 

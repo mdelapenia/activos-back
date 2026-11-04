@@ -108,7 +108,14 @@ export async function marketChat(db, user, env, body) {
 
     if (!providers.includes(provider) || !Array.isArray(messages) || !messages.length || messages.length > 20 || messages.some(m => !['user', 'assistant'].includes(m?.role) || typeof m.content !== 'string' || !m.content.trim() || m.content.length > 4000) || messages.at(-1).role !== 'user') throw new HttpError(400, 'La conversación no es válida.');
 
-    const modelMessages = messages;
+    // Some providers require the history to start with a user and alternate roles.
+    const modelMessages = [];
+    for (const message of messages) {
+        if (!modelMessages.length && message.role !== 'user') continue;
+        const previous = modelMessages.at(-1);
+        if (previous?.role === message.role) previous.content += `\n\n${message.content}`;
+        else modelMessages.push({ role: message.role, content: message.content });
+    }
 
     const row = await db.collection('ai_keys').findOne({ _id: user._id });
 
@@ -152,7 +159,14 @@ Escribí texto plano: no uses asteriscos, encabezados Markdown, tablas ni enlace
 
     try { response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(90_000) }); } catch { throw new HttpError(503, 'No se pudo conectar con el proveedor de IA.'); }
 
-    if (!response.ok) throw new HttpError(response.status === 401 || response.status === 403 ? 400 : 503, response.status === 401 || response.status === 403 ? 'El proveedor rechazó la API key o no tiene acceso al modelo.' : 'El proveedor no pudo responder. Revisá tu cuota y volvé a intentar.');
+    if (!response.ok) {
+        const label = { openai: 'OpenAI', claude: 'Claude', gemini: 'Gemini' }[provider];
+        if (response.status === 401 || response.status === 403) throw new HttpError(400, `${label} rechazó la API key o no tiene acceso al modelo.`);
+        if (response.status === 429) throw new HttpError(429, `${label} alcanzó un límite de uso o cuota. Revisá tu cuenta o intentá más tarde.`);
+        if (response.status === 404) throw new HttpError(503, `El modelo configurado de ${label} no está disponible. Revisá la configuración del servidor.`);
+        if (response.status === 400 || response.status === 422) throw new HttpError(503, `${label} rechazó la solicitud. Probá una conversación nueva o revisá la configuración del modelo y la búsqueda web.`);
+        throw new HttpError(503, `${label} no pudo responder (código ${response.status}). Intentá de nuevo más tarde.`);
+    }
 
     const data = await response.json(); let text = '', citations = [];
 
