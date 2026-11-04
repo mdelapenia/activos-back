@@ -37,7 +37,7 @@ export async function readResendImports(db, user, env, fetcher = fetch) {
         after = data.data.at(-1).id;
         if (!after) throw new HttpError(502, 'No se pudo continuar la consulta de Resend.');
     }
-    const operations = []; let unreadable = 0;
+    const operations = []; let unreadable = 0, pdfCount = 0, unrecognized = 0;
     for (const message of messages.slice(0, 50)) {
         if (typeof message.id !== 'string' || !/^[\w-]{1,100}$/.test(message.id)) continue;
         const email = await getJson(`/emails/receiving/${encodeURIComponent(message.id)}`);
@@ -46,7 +46,8 @@ export async function readResendImports(db, user, env, fetcher = fetch) {
         const candidates = parseLemon(text.slice(0, 200000)).map((op, index) => ({ op, part: `text-${index}` }));
         const list = await getJson(`/emails/receiving/${encodeURIComponent(message.id)}/attachments?limit=100`);
         if (!Array.isArray(list.data)) throw new HttpError(502, 'No se pudieron consultar los adjuntos.');
-        for (const attachment of list.data.filter(a => a.content_type === 'application/pdf').slice(0, 10)) {
+        for (const attachment of list.data.filter(a => String(a.content_type || '').split(';')[0].trim().toLowerCase() === 'application/pdf' || (a.content_type === 'application/octet-stream' && /\.pdf$/i.test(a.filename || ''))).slice(0, 10)) {
+            pdfCount++;
             if (!attachment.download_url || typeof attachment.id !== 'string' || (Number.isFinite(attachment.size) && attachment.size > 1200000)) { unreadable++; continue; }
             const url = new URL(attachment.download_url);
             if (url.protocol !== 'https:' || url.hostname !== 'inbound-cdn.resend.com' || url.username || url.password) { unreadable++; continue; }
@@ -56,7 +57,7 @@ export async function readResendImports(db, user, env, fetcher = fetch) {
             for await (const chunk of response.body) { size += chunk.length; if (size > 1200000) break; chunks.push(Buffer.from(chunk)); }
             if (size > 1200000) { unreadable++; continue; }
             const bytes = Buffer.concat(chunks);
-            try { const result = await extractDocument(db, user, env, { type:'application/pdf', data:bytes.toString('base64') }); result.operations.forEach((op, index) => candidates.push({ op, part:`pdf-${attachment.id}-${index}` })); }
+            try { const result = await extractDocument(db, user, env, { type:'application/pdf', data:bytes.toString('base64') }); if (!result.operations.length) unrecognized++; result.operations.forEach((op, index) => candidates.push({ op, part:`pdf-${attachment.id}-${index}` })); }
             catch { unreadable++; }
         }
         for (const {op, part} of candidates) {
@@ -64,5 +65,5 @@ export async function readResendImports(db, user, env, fetcher = fetch) {
             operations.push({ ...op, importId:`resend-${id}`, source:`Correo de Lemon · ${(message.subject || 'comprobante').slice(0, 200)}` });
         }
     }
-    return { operations, unreadable, truncated: more || messages.length > 50 };
+    return { operations, unreadable, pdfCount, unrecognized, messageCount: Math.min(messages.length, 50), truncated: more || messages.length > 50 };
 }

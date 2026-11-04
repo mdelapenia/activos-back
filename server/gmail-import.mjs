@@ -78,7 +78,7 @@ export async function gmailReadImports(db, user, env, fetcher = fetch, sender = 
     const params = new URLSearchParams({ q:sender ? `from:${sender}` : '{from:lemoncash.com.ar from:lemon.me}', maxResults:'50' });
     const list = await get(`messages?${params}`);
     if (list.messages !== undefined && !Array.isArray(list.messages)) throw new HttpError(502, 'Gmail devolvió una respuesta inválida.');
-    const operations = []; let unreadable = 0;
+    const operations = []; let unreadable = 0, pdfCount = 0, unrecognized = 0;
     for (const row of list.messages || []) {
         if (typeof row.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(row.id)) continue;
         const message = await get(`messages/${encodeURIComponent(row.id)}?format=full`);
@@ -93,17 +93,19 @@ export async function gmailReadImports(db, user, env, fetcher = fetch, sender = 
             parseLemon(text).forEach((op, index) => candidates.push({ op, part:`text-${index}` }));
         }
         for (const [index, part] of parts.entries()) {
-            if (part.mimeType !== 'application/pdf' || (part.body?.size || 0) > 1200000) continue;
+            if (part.mimeType !== 'application/pdf' && !(part.mimeType === 'application/octet-stream' && /\.pdf$/i.test(part.filename || ''))) continue;
+            pdfCount++;
+            if ((part.body?.size || 0) > 1200000) { unreadable++; continue; }
             let data = part.body?.data;
             if (!data && part.body?.attachmentId) { const attachment = await get(`messages/${encodeURIComponent(row.id)}/attachments/${encodeURIComponent(part.body.attachmentId)}`); data = attachment.data; }
             if (typeof data !== 'string' || data.length > 1600000) { unreadable++; continue; }
             const bytes = Buffer.from(data, 'base64url');
-            try { const extracted = await extractDocument(db, user, env, { type:'application/pdf', data:bytes.toString('base64') }); extracted.operations.forEach((op, opIndex) => candidates.push({ op, part:`pdf-${index}-${opIndex}` })); } catch { unreadable++; }
+            try { const extracted = await extractDocument(db, user, env, { type:'application/pdf', data:bytes.toString('base64') }); if (!extracted.operations.length) unrecognized++; extracted.operations.forEach((op, opIndex) => candidates.push({ op, part:`pdf-${index}-${opIndex}` })); } catch { unreadable++; }
         }
         for (const { op, part } of candidates) {
             const id = createHash('sha256').update(`${row.id}:${part}`).digest('hex').slice(0, 32);
             operations.push({ ...op, importId:`gmail-${id}`, source:`Gmail · ${String(subject).slice(0, 200)}` });
         }
     }
-    return { operations, unreadable, truncated: Boolean(list.nextPageToken) };
+    return { operations, unreadable, pdfCount, unrecognized, messageCount: (list.messages || []).length, truncated: Boolean(list.nextPageToken) };
 }
