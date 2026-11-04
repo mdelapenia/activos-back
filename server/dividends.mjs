@@ -1,6 +1,12 @@
 const RATIOS_URL = 'https://ferminrp.github.io/google-sheets-argento/api/cedears.json';
 
-export async function portfolioDividends(portfolio, apiKey, fetcher = fetch) {
+function nextYear(date) {
+    const [year, month, day] = date.split('-').map(Number);
+    const lastDay = new Date(Date.UTC(year + 1, month, 0)).getUTCDate();
+    return `${year + 1}-${String(month).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+}
+
+export async function portfolioDividends(portfolio, apiKey, fetcher = fetch, now = Date.now()) {
     if (!apiKey) return { configured: false, items: [] };
     const positions = portfolio.investments.filter(item => (item.kind === 'cedear' || item.kind === 'stock') && item.coin && item.units > 0);
     if (!positions.length) return { configured: true, items: [] };
@@ -11,7 +17,7 @@ export async function portfolioDividends(portfolio, apiKey, fetcher = fetch) {
             if (response.ok) { const data = await response.json(); if (Array.isArray(data.items)) ratios = data; }
         } catch { /* Las acciones no dependen de los ratios de CEDEAR. */ }
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date(now).toISOString().slice(0, 10);
     const items = await Promise.all(positions.map(async position => {
         const entry = ratios.items.find(row => String(row.Cedears).toUpperCase() === position.coin.toUpperCase());
         const ratio = position.kind === 'stock' ? 1 : Number(entry?.Ratio);
@@ -28,9 +34,20 @@ export async function portfolioDividends(portfolio, apiKey, fetcher = fetch) {
             if (!result.ok) throw new Error('Provider unavailable');
             const data = await result.json();
             if (!Array.isArray(data.results)) throw new Error('Invalid response');
-            const events = data.results.filter(event => typeof event.pay_date === 'string' && event.pay_date >= today && typeof event.ex_dividend_date === 'string' && typeof event.cash_amount === 'number' && event.cash_amount > 0 && event.currency === 'USD')
-                .sort((a, b) => a.pay_date.localeCompare(b.pay_date))
-                .map(event => ({ payDate: event.pay_date, exDate: event.ex_dividend_date, amountPerShare: event.cash_amount, eligible: position.date < event.ex_dividend_date, estimatedGross: position.units / ratio * event.cash_amount }));
+            const valid = data.results.filter(event => typeof event.pay_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(event.pay_date) && typeof event.ex_dividend_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(event.ex_dividend_date) && typeof event.cash_amount === 'number' && Number.isFinite(event.cash_amount) && event.cash_amount > 0 && event.currency === 'USD');
+            const announced = valid.filter(event => event.pay_date >= today).map(event => ({ payDate: event.pay_date, exDate: event.ex_dividend_date, amountPerShare: event.cash_amount, eligible: position.date < event.ex_dividend_date, estimatedGross: position.units / ratio * event.cash_amount, estimated: false }));
+            const projected = valid.filter(event => event.pay_date < today && Number(event.pay_date.slice(0, 4)) >= Number(today.slice(0, 4)) - 1).map(event => ({ payDate: nextYear(event.pay_date), exDate: nextYear(event.ex_dividend_date), amountPerShare: event.cash_amount, eligible: position.date < nextYear(event.ex_dividend_date), estimatedGross: position.units / ratio * event.cash_amount, estimated: true, sourcePayDate: event.pay_date })).filter(event => event.payDate >= today);
+            // Match each announced payment to at most one projection from the prior year.
+            const matched = new Set();
+            for (const event of announced) {
+                let best = -1, distance = 22;
+                projected.forEach((candidate, index) => {
+                    const days = Math.abs(Date.parse(candidate.payDate) - Date.parse(event.payDate)) / 86400000;
+                    if (!matched.has(index) && days < distance) { best = index; distance = days; }
+                });
+                if (best >= 0) matched.add(best);
+            }
+            const events = [...announced, ...projected.filter((_, index) => !matched.has(index))].sort((a, b) => a.payDate.localeCompare(b.payDate));
             return { ...base, status: 'ok', ratio, symbol, events };
         } catch { return { ...base, status: 'unavailable' }; }
     }));

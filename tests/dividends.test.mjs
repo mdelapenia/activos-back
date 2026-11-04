@@ -43,3 +43,16 @@ test('incluye acciones y SPY sin ratios de CEDEAR y calcula unidades fraccionari
     assert.equal(items[0].events[0].estimatedGross, 1);
     assert.equal(items[0].kind, 'stock');
 });
+
+test('proyecta pagos del año anterior y evita duplicar un pago anunciado cercano', async () => {
+    const portfolio = { investments: [{ id: 's', name: 'SPY', kind: 'stock', coin: 'SPY', units: 2, date: '2025-01-01' }] };
+    const fetcher = async () => ({ ok: true, json: async () => ({ results: [
+        { pay_date: '2026-03-15', ex_dividend_date: '2026-03-10', cash_amount: 1, currency: 'USD' },
+        { pay_date: '2026-06-15', ex_dividend_date: '2026-06-10', cash_amount: 2, currency: 'USD' },
+        { pay_date: '2027-03-20', ex_dividend_date: '2027-03-12', cash_amount: 1.2, currency: 'USD' },
+    ] }) });
+    const { items } = await portfolioDividends(portfolio, 'key', fetcher, Date.parse('2026-11-04T12:00:00Z'));
+    assert.equal(items[0].events.length, 2);
+    assert.equal(items[0].events[0].estimated, false);
+    assert.deepEqual(items[0].events[1], { payDate: '2027-06-15', exDate: '2027-06-10', amountPerShare: 2, eligible: true, estimatedGross: 4, estimated: true, sourcePayDate: '2026-06-15' });
+});
