@@ -9,6 +9,7 @@ export async function ensureIndexes(db) {
         db.collection('users').createIndex({ email: 1 }, { unique: true }),
         db.collection('sessions').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('sessions').createIndex({ userId: 1 }),
+        db.collection('gmail_oauth_states').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('passkey_challenges').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('passkeys').createIndex({ userId: 1 }),
     ]);

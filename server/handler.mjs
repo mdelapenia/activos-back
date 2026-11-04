@@ -1,3 +1,4 @@
+import { gmailStatus, gmailStart, gmailCallback, gmailDisconnect } from './gmail-import.mjs';
 import { registrationOptions, registerPasskey, authenticationOptions, authenticatePasskey } from './passkeys.mjs';
 import { usInflation } from './inflation.mjs';
 import { getDatabase } from './database.mjs';
@@ -63,7 +64,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
         try {
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
-            const allowed = { '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
+            const allowed = { '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
             if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
             if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
@@ -74,6 +75,10 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             }
             const db = await database();
             const now = clock();
+            if (path === '/api/imports/gmail/callback') {
+                await gmailCallback(db, env, new URL(req.url, 'http://localhost').searchParams, now);
+                res.statusCode = 303; res.setHeader('Location', new URL('/importaciones', env.APP_ORIGIN).toString()); return res.end();
+            }
             if (path === '/api/passkey/login/options') return reply(200, await authenticationOptions(db, env, now));
             if (path === '/api/passkey/login/verify') return reply(200, await startSession(db, req, res, await authenticatePasskey(db, await jsonBody(req), env, now), now, production));
             if (path === '/api/login' || path === '/api/register') {
@@ -103,6 +108,8 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 return reply(200, { ok: true });
             }
             const user = await requireUser(db, req, now);
+            if (path === '/api/imports/gmail') return reply(200, method === 'GET' ? await gmailStatus(db, user, env) : await gmailDisconnect(db, user, env));
+            if (path === '/api/imports/gmail/start') return reply(200, await gmailStart(db, user, env, now));
             if (path === '/api/ai/keys') return reply(200, await keySettings(db, user, env, method === 'POST' ? await jsonBody(req) : null));
             if (path === '/api/ai/chat') return reply(200, await marketChat(db, user, env, await jsonBody(req)));
             if (path === '/api/passkey/status') return reply(200, { count: await db.collection('passkeys').countDocuments({ userId: user._id }) });
