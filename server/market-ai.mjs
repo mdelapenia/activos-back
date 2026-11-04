@@ -149,7 +149,7 @@ Escribí texto plano: no uses asteriscos, encabezados Markdown, tablas ni enlace
 
     let url, headers = { 'Content-Type': 'application/json' }, payload;
 
-    if (provider === 'openrouter') { url = 'https://openrouter.ai/api/v1/chat/completions'; headers.Authorization = `Bearer ${key}`; payload = { model: 'openrouter/free', messages: [{ role: 'system', content: `${system} No tenés búsqueda web en esta solicitud; no afirmes tener datos actuales ni inventes fuentes.` }, ...modelMessages] }; }
+    if (provider === 'openrouter') { url = 'https://openrouter.ai/api/v1/chat/completions'; headers.Authorization = `Bearer ${key}`; payload = { model: 'openrouter/free', messages: [{ role: 'system', content: `${system.replace('Tenés acceso a una herramienta de búsqueda web: usala cuando la consulta dependa de noticias, precios, resultados o datos actuales.', 'En esta solicitud no disponés de búsqueda web ni herramientas externas.')} No invoques ni simules herramientas o búsquedas. Respondé con lo que sabés y aclarás si faltan datos actuales; no inventes cotizaciones ni fuentes.` }, ...modelMessages] }; }
     else if (provider === 'openai') { url = 'https://api.openai.com/v1/responses'; headers.Authorization = `Bearer ${key}`; payload = { model: env.OPENAI_CHAT_MODEL || 'gpt-5-mini', instructions: system, input: modelMessages, tools: [{ type: 'web_search' }], store: false }; }
 
     else if (provider === 'claude') { url = 'https://api.anthropic.com/v1/messages'; headers['x-api-key'] = key; headers['anthropic-version'] = '2023-06-01'; payload = { model: env.CLAUDE_CHAT_MODEL || 'claude-sonnet-4-6', max_tokens: 2048, system, messages: modelMessages, tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }] }; }
@@ -184,7 +184,19 @@ Escribí texto plano: no uses asteriscos, encabezados Markdown, tablas ni enlace
 
     else { const candidate = data.candidates?.[0]; text = (candidate?.content?.parts || []).map(p => p.text || '').join(''); citations = (candidate?.groundingMetadata?.groundingChunks || []).filter(c => c.web?.uri).map(c => ({ url: c.web.uri, title: c.web.title })); }
 
-    if (!text) throw new HttpError(503, 'El proveedor no devolvió una respuesta.');
+    const stripToolCalls = value => typeof value === 'string' ? value.replace(/<\|tool_call_start\|>[\s\S]*?(?:<\|tool_call_end\|>|$)/gi, '').trim() : '';
+    if (provider === 'openrouter') {
+        text = stripToolCalls(text);
+        if (!text) {
+            const retryPayload = { ...payload, messages: [...payload.messages, { role: 'user', content: 'Respondé directamente en texto. No tenés herramientas ni búsqueda web; no generes llamadas a herramientas ni inventes datos actuales.' }] };
+            let retry;
+            try { retry = await fetch(url, { method: 'POST', headers, body: JSON.stringify(retryPayload), signal: AbortSignal.timeout(90_000) }); } catch { throw new HttpError(503, 'El modelo no pudo completar la respuesta. Volvé a intentar.'); }
+            if (!retry.ok) throw new HttpError(503, 'El modelo no pudo completar la respuesta. Volvé a intentar.');
+            const retried = await retry.json();
+            text = stripToolCalls(retried.choices?.[0]?.message?.content);
+        }
+    } else text = stripToolCalls(text);
+    if (!text) throw new HttpError(503, 'El modelo no pudo generar una respuesta válida. Volvé a intentar o elegí otro proveedor.');
     text = text.replace(/\*\*(.+?)\*\*/gs, '$1').replace(/^\s*#{1,6}\s+/gm, '').replace(/^(\s*)\*\s+/gm, '$1• ').trim();
 
     return { text, citations: citations.filter(c => /^https?:\/\//i.test(c.url)).slice(0, 12) };

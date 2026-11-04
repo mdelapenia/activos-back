@@ -83,3 +83,17 @@ test('OpenRouter usa exclusivamente el selector gratuito y acepta una clave comp
         assert.equal(result.text, 'Hola');
     } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test('OpenRouter reintenta si el modelo devuelve una llamada interna en vez de una respuesta', async () => {
+    const db = { collection: () => ({ findOne: async () => null }) };
+    const originalFetch = globalThis.fetch; let calls = 0;
+    try {
+        globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: ++calls === 1 ? "<|tool_call_start|>[google(query='QQQ')]<|tool_call_end|>" : 'Podés considerar una cartera diversificada.' } }] }) });
+        const result = await marketChat(db, { _id: 'u' }, { OPENROUTER_API_KEY: 'sk-or-test' }, { provider: 'openrouter', messages: [{ role: 'user', content: '¿Cómo invierto?' }] });
+        assert.equal(calls, 2);
+        assert.equal(result.text, 'Podés considerar una cartera diversificada.');
+        globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '<|tool_call_start|>google()<|tool_call_end|>' } }] }) });
+        await assert.rejects(marketChat(db, { _id: 'u' }, { OPENROUTER_API_KEY: 'sk-or-test' }, { provider: 'openrouter', messages: [{ role: 'user', content: '¿Cómo invierto?' }] }), /respuesta válida/);
+    } finally { globalThis.fetch = originalFetch; }
+});
