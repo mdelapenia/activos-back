@@ -36,6 +36,8 @@ test('el asistente pide investigar y construir escenarios sin inventar cotizacio
         assert.match(payload.system_instruction.parts[0].text, /Usá el contexto de la conversación reciente/);
         assert.match(payload.system_instruction.parts[0].text, /no afirmes que lo hiciste/);
         assert.match(payload.system_instruction.parts[0].text, /exactamente una pregunta breve por mensaje/);
+        assert.match(payload.system_instruction.parts[0].text, /máximo 90 palabras/);
+        assert.match(payload.system_instruction.parts[0].text, /pérdidas pueden superar el porcentaje tolerado/);
         assert.match(payload.system_instruction.parts[0].text, /saltá las preguntas ya respondidas/);
         await marketChat(db, user, env, { provider: 'gemini', messages: [{ role: 'assistant', content: 'Mensaje anterior' }, { role: 'user', content: 'Primera consulta' }, { role: 'user', content: 'Reintento' }], assets: [] });
         assert.equal(payload.contents.length, 1);
@@ -95,5 +97,17 @@ test('OpenRouter reintenta si el modelo devuelve una llamada interna en vez de u
         assert.equal(result.text, 'Podés considerar una cartera diversificada.');
         globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: '<|tool_call_start|>google()<|tool_call_end|>' } }] }) });
         await assert.rejects(marketChat(db, { _id: 'u' }, { OPENROUTER_API_KEY: 'sk-or-test' }, { provider: 'openrouter', messages: [{ role: 'user', content: '¿Cómo invierto?' }] }), /respuesta válida/);
+    } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test('OpenRouter intenta resumir una recomendación de inversión extensa', async () => {
+    const db = { collection: () => ({ findOne: async () => null }) };
+    const originalFetch = globalThis.fetch; let calls = 0;
+    try {
+        globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: ++calls === 1 ? 'Detalle '.repeat(160) : 'Dos opciones, con sus riesgos.' } }] }) });
+        const result = await marketChat(db, { _id: 'u' }, { OPENROUTER_API_KEY: 'sk-or-test' }, { provider: 'openrouter', messages: [{ role: 'user', content: 'Quiero invertir' }] });
+        assert.equal(calls, 2);
+        assert.equal(result.text, 'Dos opciones, con sus riesgos.');
     } finally { globalThis.fetch = originalFetch; }
 });
