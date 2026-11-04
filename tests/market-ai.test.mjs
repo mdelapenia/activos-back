@@ -44,6 +44,11 @@ test('el asistente pide investigar y construir escenarios sin inventar cotizacio
         await marketChat(db, user, env, { provider: 'gemini', messages: [{ role: 'assistant', content: 'Mensaje anterior' }, { role: 'user', content: 'Primera consulta' }, { role: 'user', content: 'Reintento' }], assets: [] });
         assert.equal(payload.contents.length, 1);
         assert.match(payload.contents[0].parts[0].text, /Primera consulta[\s\S]*Reintento/);
+        await marketChat(db, user, env, { provider: 'gemini', mode: 'allocation', messages: [{ role: 'user', content: 'Quiero definir objetivos' }] });
+        assert.match(payload.system_instruction.parts[0].text, /allocation/);
+        assert.match(payload.system_instruction.parts[0].text, /sumar exactamente 100/);
+        assert.match(payload.system_instruction.parts[0].text, /cuánto puede tolerar perder/);
+        await assert.rejects(marketChat(db, user, env, { provider: 'gemini', mode: 'invalid', messages: [{ role: 'user', content: 'Hola' }] }), /Modo de conversación inválido/);
         globalThis.fetch = async () => ({ ok: false, status: 429 });
         await assert.rejects(marketChat(db, user, env, { provider: 'gemini', messages: [{ role: 'user', content: 'QQQ' }] }), /Gemini alcanzó un límite/);
     } finally { globalThis.fetch = originalFetch; }

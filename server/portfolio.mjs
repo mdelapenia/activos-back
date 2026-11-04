@@ -55,7 +55,7 @@ export function validatePortfolio(raw) {
     if (!Array.isArray(alerts) || alerts.length > 200) return invalid();
     const alertIds = new Set();
     for (const a of alerts) {
-        if (!a || !text(a.id, 128) || alertIds.has(a.id) || !['price', 'variation', 'concentration', 'dividend', 'maturity'].includes(a.kind) || !['cedear', 'stock', 'crypto'].includes(a.assetKind) || !text(a.assetId, 150) || !text(a.assetName, 150) || !['above', 'below'].includes(a.direction) || typeof a.threshold !== 'number' || !Number.isFinite(a.threshold) || a.threshold <= 0 || a.threshold > 1e15 || typeof a.date !== 'string') return invalid();
+        if (!a || !text(a.id, 128) || alertIds.has(a.id) || !['price', 'variation', 'concentration', 'dividend', 'maturity'].includes(a.kind) || !['cedear', 'stock', 'crypto', 'arg-stock', 'bond', 'fund'].includes(a.assetKind) || !text(a.assetId, 150) || !text(a.assetName, 150) || !['above', 'below'].includes(a.direction) || typeof a.threshold !== 'number' || !Number.isFinite(a.threshold) || a.threshold <= 0 || a.threshold > 1e15 || typeof a.date !== 'string') return invalid();
         if (['concentration', 'dividend', 'maturity'].includes(a.kind) && a.threshold > 100) return invalid();
         if (a.kind === 'maturity') { const date = new Date(`${a.date}T12:00:00Z`); if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== a.date) return invalid(); }
         else if (a.date !== '') return invalid();

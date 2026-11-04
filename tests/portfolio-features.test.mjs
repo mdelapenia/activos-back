@@ -37,6 +37,7 @@ test('conserva alertas y rechaza configuraciones inválidas', () => {
     portfolio.alerts = [
         { id: 'price', kind: 'price', assetKind: 'crypto', assetId: 'bitcoin', assetName: 'Bitcoin', threshold: 100000, direction: 'above', date: '' },
         { id: 'maturity', kind: 'maturity', assetKind: 'stock', assetId: 'AAPL', assetName: 'Apple', threshold: 7, direction: 'above', date: '2026-12-15' },
+        ...['arg-stock', 'bond', 'fund'].map(assetKind => ({ id: assetKind, kind: 'price', assetKind, assetId: assetKind === 'fund' ? 'fondo~1~2' : 'YPFD', assetName: 'Activo local', threshold: 10, direction: 'above', date: '' })),
     ];
     assert.deepEqual(validatePortfolio(portfolio).alerts, portfolio.alerts);
     assert.throws(() => validatePortfolio({ ...portfolio, alerts: [...portfolio.alerts, portfolio.alerts[0]] }));
