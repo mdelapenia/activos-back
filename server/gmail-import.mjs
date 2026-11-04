@@ -58,3 +58,52 @@ export async function gmailDisconnect(db, user, env) {
     }
     return { connected: false };
 }
+import { extractDocument, parseLemon } from './import-extract.mjs';
+
+export async function gmailReadImports(db, user, env, fetcher = fetch, sender = '') {
+    if (typeof sender !== 'string' || (sender && (sender.length > 254 || !/^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?\.[a-zA-Z]{2,}$/.test(sender)))) throw new HttpError(400, 'Ingresá una dirección de correo válida.');
+    const { key } = config(env);
+    const connection = await db.collection('gmail_connections').findOne({ _id: user._id });
+    if (!connection) throw new HttpError(400, 'Conectá tu cuenta de Gmail primero.');
+    const refreshToken = unseal(connection.refreshToken, key, user._id);
+    const tokenResponse = await fetcher('https://oauth2.googleapis.com/token', { method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body:new URLSearchParams({ client_id:env.GOOGLE_CLIENT_ID, client_secret:env.GOOGLE_CLIENT_SECRET, refresh_token:refreshToken, grant_type:'refresh_token' }), signal:AbortSignal.timeout(20000) });
+    if (!tokenResponse.ok) throw new HttpError(502, 'No se pudo renovar el acceso a Gmail. Volvé a conectar la cuenta.');
+    const token = await tokenResponse.json();
+    if (!token.access_token) throw new HttpError(502, 'Google no entregó acceso a Gmail.');
+    const get = async path => {
+        const response = await fetcher(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, { headers:{ Authorization:`Bearer ${token.access_token}` }, signal:AbortSignal.timeout(20000) });
+        if (!response.ok) throw new HttpError(502, 'No se pudieron consultar los correos de Gmail.');
+        return response.json();
+    };
+    const params = new URLSearchParams({ q:sender ? `from:${sender}` : '{from:lemoncash.com.ar from:lemon.me}', maxResults:'50' });
+    const list = await get(`messages?${params}`);
+    if (list.messages !== undefined && !Array.isArray(list.messages)) throw new HttpError(502, 'Gmail devolvió una respuesta inválida.');
+    const operations = []; let unreadable = 0;
+    for (const row of list.messages || []) {
+        if (typeof row.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(row.id)) continue;
+        const message = await get(`messages/${encodeURIComponent(row.id)}?format=full`);
+        const parts = []; const walk = (part, depth = 0) => { if (!part || depth > 15 || parts.length >= 200) return; parts.push(part); if (Array.isArray(part.parts)) part.parts.forEach(child => walk(child, depth + 1)); };
+        walk(message.payload);
+        const subject = (message.payload?.headers || []).find(h => h.name?.toLowerCase() === 'subject')?.value || 'Comprobante Lemon';
+        const candidates = [];
+        const textPart = parts.find(p => p.mimeType === 'text/plain' && p.body?.data && !p.filename) || parts.find(p => p.mimeType === 'text/html' && p.body?.data && !p.filename);
+        if (textPart) {
+            let text = Buffer.from(textPart.body.data, 'base64url').toString('utf8').slice(0, 200000);
+            if (textPart.mimeType === 'text/html') text = text.replace(/<\s*br\s*\/?>|<\/(?:p|div|tr|li|h[1-6])\s*>/gi, '\n').replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&');
+            parseLemon(text).forEach((op, index) => candidates.push({ op, part:`text-${index}` }));
+        }
+        for (const [index, part] of parts.entries()) {
+            if (part.mimeType !== 'application/pdf' || (part.body?.size || 0) > 1200000) continue;
+            let data = part.body?.data;
+            if (!data && part.body?.attachmentId) { const attachment = await get(`messages/${encodeURIComponent(row.id)}/attachments/${encodeURIComponent(part.body.attachmentId)}`); data = attachment.data; }
+            if (typeof data !== 'string' || data.length > 1600000) { unreadable++; continue; }
+            const bytes = Buffer.from(data, 'base64url');
+            try { const extracted = await extractDocument(db, user, env, { type:'application/pdf', data:bytes.toString('base64') }); extracted.operations.forEach((op, opIndex) => candidates.push({ op, part:`pdf-${index}-${opIndex}` })); } catch { unreadable++; }
+        }
+        for (const { op, part } of candidates) {
+            const id = createHash('sha256').update(`${row.id}:${part}`).digest('hex').slice(0, 32);
+            operations.push({ ...op, importId:`gmail-${id}`, source:`Gmail · ${String(subject).slice(0, 200)}` });
+        }
+    }
+    return { operations, unreadable, truncated: Boolean(list.nextPageToken) };
+}

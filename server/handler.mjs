@@ -1,5 +1,6 @@
+import { resendAddress, readResendImports } from './resend-import.mjs';
 import { extractDocument } from './import-extract.mjs';
-import { gmailStatus, gmailStart, gmailCallback, gmailDisconnect } from './gmail-import.mjs';
+import { gmailStatus, gmailStart, gmailCallback, gmailDisconnect, gmailReadImports } from './gmail-import.mjs';
 import { registrationOptions, registerPasskey, authenticationOptions, authenticatePasskey } from './passkeys.mjs';
 import { usInflation } from './inflation.mjs';
 import { getDatabase } from './database.mjs';
@@ -66,7 +67,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
         try {
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
-            const allowed = { '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
+            const allowed = { '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
             if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
             if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
@@ -112,8 +113,10 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             const user = await requireUser(db, req, now);
             if (path === '/api/stocks/history') return reply(200, await stockHistory((new URL(req.url, 'http://localhost').searchParams.get('symbol') || '').toUpperCase()));
             if (path === '/api/stocks/quotes') return reply(200, await stockQuotes((new URL(req.url, 'http://localhost').searchParams.get('symbols') || '').split(',')));
+            if (path === '/api/imports/resend') return reply(200, method === 'GET' ? await resendAddress(db, user, env) : await readResendImports(db, user, env));
             if (path === '/api/imports/extract') return reply(200, await extractDocument(db, user, env, await jsonBody(req)));
             if (path === '/api/imports/gmail') return reply(200, method === 'GET' ? await gmailStatus(db, user, env) : await gmailDisconnect(db, user, env));
+            if (path === '/api/imports/gmail/sync') return reply(200, await gmailReadImports(db, user, env, fetch, (await jsonBody(req)).sender ?? ''));
             if (path === '/api/imports/gmail/start') return reply(200, await gmailStart(db, user, env, now));
             if (path === '/api/ai/keys') return reply(200, await keySettings(db, user, env, method === 'POST' ? await jsonBody(req) : null));
             if (path === '/api/ai/chat') return reply(200, await marketChat(db, user, env, await jsonBody(req)));
