@@ -36,13 +36,22 @@ export function validatePortfolio(raw) {
         const date = new Date(`${s.date}T12:00:00Z`);
         if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== s.date) return invalid();
     }
+    const imports = raw.imports ?? [];
+    if (!Array.isArray(imports) || imports.length > 5000) return invalid();
+    const importIds = new Set();
+    const importFields = ['source', 'asset', 'name', 'kind', 'side', 'date', 'quantity', 'price', 'amount', 'currency', 'fee', 'externalId', 'executions'];
+    for (const op of imports) {
+        if (!op || !text(op.id, 128) || importIds.has(op.id) || !['pending', 'confirmed', 'discarded'].includes(op.status)) return invalid();
+        importIds.add(op.id);
+        if (importFields.some(field => typeof op[field] !== 'string' || op[field].length > (field === 'executions' ? 20000 : 300))) return invalid();
+    }
     const p = raw.preferences;
     if (!p || !['dark', 'light', 'system'].includes(p.theme) || !['USD', 'ARS'].includes(p.display)
         || !['bolsa', 'contadoconliqui', 'blue', 'oficial', 'mayorista', 'cripto', 'tarjeta'].includes(p.dollar)
         || typeof p.hidden !== 'boolean' || typeof p.sidebarCollapsed !== 'boolean' || ![0, 12, 36, 60].includes(p.horizon)) return invalid();
     if ((p.showChatButton !== undefined && typeof p.showChatButton !== 'boolean') || (p.showQuotesBar !== undefined && typeof p.showQuotesBar !== 'boolean')) return invalid();
     if (p.panels !== undefined && (!Array.isArray(p.panels) || p.panels.some(x => !['value', 'evolution', 'distribution', 'investments', 'inflation', 'macro', 'streak', 'panel-v2'].includes(x)))) return invalid();
-    return { investments, ...(raw.sales === undefined ? {} : { sales: sales.map(({ id, name, date, fraction, proceeds, currency, cost, costCurrency }) => ({ id, name, date, fraction, proceeds, currency, cost, costCurrency })) }), preferences: { theme: p.theme, display: p.display, dollar: p.dollar, hidden: p.hidden, sidebarCollapsed: p.sidebarCollapsed, horizon: p.horizon, ...(p.panels === undefined ? {} : { panels: p.panels }), ...(p.showChatButton === undefined ? {} : { showChatButton: p.showChatButton }), ...(p.showQuotesBar === undefined ? {} : { showQuotesBar: p.showQuotesBar }) } };
+    return { investments, ...(raw.imports === undefined ? {} : { imports: imports.map(op => ({ id: op.id, status: op.status, ...Object.fromEntries(importFields.map(field => [field, op[field]])) })) }), ...(raw.sales === undefined ? {} : { sales: sales.map(({ id, name, date, fraction, proceeds, currency, cost, costCurrency }) => ({ id, name, date, fraction, proceeds, currency, cost, costCurrency })) }), preferences: { theme: p.theme, display: p.display, dollar: p.dollar, hidden: p.hidden, sidebarCollapsed: p.sidebarCollapsed, horizon: p.horizon, ...(p.panels === undefined ? {} : { panels: p.panels }), ...(p.showChatButton === undefined ? {} : { showChatButton: p.showChatButton }), ...(p.showQuotesBar === undefined ? {} : { showQuotesBar: p.showQuotesBar }) } };
 }
 
 export async function readPortfolio(db, userId) {

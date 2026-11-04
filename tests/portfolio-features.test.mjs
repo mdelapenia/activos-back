@@ -23,3 +23,11 @@ test('acciones se guardan en USD y se conservan CEDEARs anteriores en USD', () =
     portfolio.investments[0].currency = 'ARS';
     assert.throws(() => validatePortfolio(portfolio));
 });
+
+test('conserva operaciones importadas junto a la cartera y rechaza IDs repetidos', () => {
+    const portfolio = emptyPortfolio();
+    portfolio.imports = [{ id: 'op-1', status: 'pending', source: 'comprobante.pdf', asset: 'ITUB', name: 'ITUB', kind: 'stock', side: 'buy', date: '2026-01-02', quantity: '0.123456789012345678', price: '4.2', amount: '0.5185185138518518476', currency: 'USD', fee: '0', externalId: 'order-1', executions: '[{"executionId":"a"}]' }];
+    assert.deepEqual(validatePortfolio(portfolio).imports, portfolio.imports);
+    portfolio.imports.push({ ...portfolio.imports[0] });
+    assert.throws(() => validatePortfolio(portfolio));
+});
