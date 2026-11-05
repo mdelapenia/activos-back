@@ -147,3 +147,72 @@ export async function checkDividendPush(db, env, now = Date.now(), { loadDividen
         } catch (error) { console.error('No se pudieron revisar alertas de dividendos:', error.message); }
     }
 }
+
+// Las cotizaciones usan los mismos proveedores y unidades que la pantalla de alertas.
+export async function loadPriceQuotes(alerts, fetcher = fetch) {
+    const quotes = {};
+    const groups = new Map();
+    for (const alert of alerts) {
+        const list = groups.get(alert.assetKind) || [];
+        list.push(alert.assetId);
+        groups.set(alert.assetKind, list);
+    }
+    await Promise.allSettled([...groups].map(async ([kind, ids]) => {
+        const unique = [...new Set(ids)];
+        const paths = { cedear: 'arg_cedears', stock: 'usa_stocks', 'arg-stock': 'arg_stocks', bond: 'arg_bonds' };
+        let url;
+        if (kind === 'crypto') url = `https://api.coingecko.com/api/v3/simple/price?${new URLSearchParams({ ids: unique.join(','), vs_currencies: 'usd', precision: 'full' })}`;
+        else if (kind === 'fund') url = 'https://api.argentinadatos.com/v1/finanzas/fci/fondos';
+        else if (paths[kind]) url = `https://data912.com/live/${paths[kind]}`;
+        else return;
+        const response = await fetcher(url, { signal: AbortSignal.timeout(15000) });
+        if (!response.ok) throw new Error('Proveedor de precios no disponible');
+        const data = await response.json();
+        for (const id of unique) {
+            let price;
+            if (kind === 'crypto') price = data?.[id]?.usd;
+            else if (kind === 'fund') {
+                const [, fundId, classId] = id.split('~');
+                const row = data?.fondos?.find(item => String(item?.fondoId) === fundId && String(item?.claseId) === classId);
+                price = Number(row?.rendimientos?.valorCuotaparte);
+            } else {
+                const row = Array.isArray(data) && data.find(item => String(item?.symbol ?? '').toUpperCase() === id.toUpperCase());
+                price = Number(row?.c);
+                if (kind === 'bond') price /= 100;
+            }
+            if (typeof price === 'number' && Number.isFinite(price) && price > 0) quotes[`${kind}:${id}`] = price;
+        }
+    }));
+    return quotes;
+}
+
+export async function checkPricePush(db, env, now = Date.now(), { loadQuotes = loadPriceQuotes, deliver = sendPush } = {}) {
+    const subscriptions = await db.collection('push_subscriptions').find({}).toArray();
+    const users = new Map();
+    for (const row of subscriptions) { const key = String(row.userId); if (!users.has(key)) users.set(key, []); users.get(key).push(row); }
+    const portfolios = [];
+    for (const rows of users.values()) {
+        try {
+            const { portfolio } = await readPortfolio(db, rows[0].userId);
+            portfolios.push({ rows, portfolio, alerts: (portfolio.alerts || []).filter(alert => alert.kind === 'price') });
+        } catch (error) { console.error('No se pudieron cargar alertas de precio:', error.message); }
+    }
+    const quotes = await loadQuotes(portfolios.flatMap(item => item.alerts));
+    for (const { rows, portfolio, alerts } of portfolios) for (const alert of alerts) {
+        const price = quotes[`${alert.assetKind}:${alert.assetId}`];
+        if (!Number.isFinite(price) || price <= 0) continue;
+        const matched = alert.direction === 'above' ? price >= alert.threshold : price <= alert.threshold;
+        for (const row of rows) {
+            const id = digest(`price:${row._id}:${alert.id}`);
+            if (!matched) { await db.collection('push_deliveries').deleteOne({ _id: id }); continue; }
+            if (isQuietHours(portfolio.preferences?.quietHours, now)) continue;
+            try {
+                await db.collection('push_deliveries').insertOne({ _id: id, createdAt: new Date(now) });
+                const currency = ['cedear', 'arg-stock', 'bond', 'fund'].includes(alert.assetKind) ? 'ARS' : 'USD';
+                const formatted = new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 4 }).format(price);
+                try { await deliver(db, row, { title: `💸 Precio · ${alert.assetName}`, body: `Precio: ${formatted}. Tu alerta de precio se activó.`, url: '/precios' }, env); }
+                catch (error) { await db.collection('push_deliveries').deleteOne({ _id: id }); throw error; }
+            } catch (error) { if (error.code !== 11000) console.error('No se pudo enviar una alerta de precio:', error.message); }
+        }
+    }
+}

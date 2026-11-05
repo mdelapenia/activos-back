@@ -1,7 +1,7 @@
 import { createApiServer } from './server/http.mjs';
 import handler from './server/handler.mjs';
 import { closeDatabase, getDatabase } from './server/database.mjs';
-import { checkDividendPush } from './server/push.mjs';
+import { checkDividendPush, checkPricePush } from './server/push.mjs';
 import { loadAtlasEnvironment } from './server/environment.mjs';
 
 loadAtlasEnvironment();
@@ -15,14 +15,14 @@ if (process.env.NODE_ENV === 'production' && !process.env.APP_ORIGIN) {
 const server = createApiServer(handler);
 let checkingPush = false;
 async function checkPush() {
-    if (checkingPush || !process.env.MASSIVE_API_KEY) return;
+    if (checkingPush) return;
     checkingPush = true;
-    try { await checkDividendPush(await getDatabase(), process.env); }
+    try { const db = await getDatabase(); await checkPricePush(db, process.env); await checkDividendPush(db, process.env); }
     catch (error) { console.error('No se pudieron revisar las notificaciones:', error.message); }
     finally { checkingPush = false; }
 }
 const initialPushCheck = setTimeout(() => void checkPush(), 30_000);
-const pushTimer = setInterval(() => void checkPush(), 30 * 60_000);
+const pushTimer = setInterval(() => void checkPush(), 5 * 60_000);
 initialPushCheck.unref();
 pushTimer.unref();
 server.listen(port, process.env.HOST || '0.0.0.0', () => {

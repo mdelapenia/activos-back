@@ -68,7 +68,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
         try {
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
-            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
+            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
             if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
             if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
@@ -126,7 +126,17 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             if (path === '/api/imports/gmail/start') return reply(200, await gmailStart(db, user, env, now));
             if (path === '/api/ai/keys') return reply(200, await keySettings(db, user, env, method === 'POST' ? await jsonBody(req) : null));
             if (path === '/api/ai/chat') return reply(200, await marketChat(db, user, env, await jsonBody(req)));
-            if (path === '/api/passkey/status') return reply(200, { count: await db.collection('passkeys').countDocuments({ userId: user._id }) });
+            if (path === '/api/passkey/status') {
+                const keys = await db.collection('passkeys').find({ userId: user._id }).toArray();
+                return reply(200, { count: keys.length, keys: keys.map(key => ({ id: key._id, createdAt: key.createdAt || null, lastUsedAt: key.lastUsedAt || null })) });
+            }
+            if (path === '/api/passkey/remove') {
+                const { id } = await jsonBody(req);
+                if (typeof id !== 'string' || !id || id.length > 1024) throw new HttpError(400, 'Passkey inválida.');
+                const result = await db.collection('passkeys').deleteOne({ _id: id, userId: user._id });
+                if (!result.deletedCount) throw new HttpError(404, 'No se encontró la passkey.');
+                return reply(200, { ok: true });
+            }
             if (path === '/api/passkey/register/options') return reply(200, await registrationOptions(db, user, env, now));
             if (path === '/api/passkey/register/verify') return reply(200, await registerPasskey(db, user, await jsonBody(req), env, now));
             if (path === '/api/benchmarks/merval') {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkDividendPush, saveSubscription, testPush, isQuietHours, removeSubscription, pushConfig, dividendPaymentWhen } from '../server/push.mjs';
+import { checkDividendPush, checkPricePush, loadPriceQuotes, saveSubscription, testPush, isQuietHours, removeSubscription, pushConfig, dividendPaymentWhen } from '../server/push.mjs';
 
 const env = { VAPID_PUBLIC_KEY: 'public', VAPID_PRIVATE_KEY: 'private', VAPID_SUBJECT: 'https://example.com', MASSIVE_API_KEY: 'test' };
 test('describe la fecha relativa según el día en Argentina', () => {
@@ -127,4 +127,33 @@ test('la prueba de dividendo aclara cuando no se puede consultar el importe', as
     let received;
     await testPush(db, { _id: 'user' }, 'https://example.com', env, 'itub', async (_db, _row, payload) => { received = payload; return true; }, async () => { throw new Error('provider'); });
     assert.match(received.body, /no se pudo consultar/);
+});
+
+
+test('envía precio una vez por activación y vuelve a avisar cuando se cruza otra vez', async () => {
+    const sent = [], deliveries = new Set();
+    const alert = { id: 'btc', kind: 'price', assetKind: 'crypto', assetId: 'bitcoin', assetName: 'Bitcoin', threshold: 80000, direction: 'below' };
+    const db = { collection(name) {
+        if (name === 'push_subscriptions') return { find: () => ({ toArray: async () => [{ _id: 'device', userId: 'user' }] }) };
+        if (name === 'portfolios') return { findOne: async () => ({ portfolio: { alerts: [alert] } }) };
+        if (name === 'push_deliveries') return { insertOne: async row => { if (deliveries.has(row._id)) throw Object.assign(new Error('duplicate'), { code: 11000 }); deliveries.add(row._id); }, deleteOne: async row => deliveries.delete(row._id) };
+        throw new Error(name);
+    } };
+    let price = 79588.1616;
+    const options = { loadQuotes: async () => ({ 'crypto:bitcoin': price }), deliver: async (_db, _row, payload) => { sent.push(payload); } };
+    await checkPricePush(db, env, Date.now(), options);
+    await checkPricePush(db, env, Date.now(), options);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].body, /79\.588,1616/);
+    price = 81000;
+    await checkPricePush(db, env, Date.now(), options);
+    price = 79000;
+    await checkPricePush(db, env, Date.now(), options);
+    assert.equal(sent.length, 2);
+});
+
+test('consulta criptomonedas y conserva las unidades de bonos', async () => {
+    const alerts = [{ assetKind: 'crypto', assetId: 'bitcoin' }, { assetKind: 'bond', assetId: 'AL30' }];
+    const quotes = await loadPriceQuotes(alerts, async url => ({ ok: true, json: async () => url.includes('coingecko') ? { bitcoin: { usd: 79588.1616 } } : [{ symbol: 'AL30', c: 75000 }] }));
+    assert.deepEqual(quotes, { 'crypto:bitcoin': 79588.1616, 'bond:AL30': 750 });
 });

@@ -173,3 +173,15 @@ test('el estado de passkeys requiere sesión y cuenta solo las de la cuenta', as
     assert.equal((await call('passkey/status', { cookie: first.cookie.split(';')[0] })).body.count, 1);
     assert.equal((await call('passkey/status', { cookie: second.cookie.split(';')[0] })).body.count, 0);
 });
+
+
+test('cada cuenta puede eliminar solo sus propias passkeys', async () => {
+    assert.equal((await call('passkey/remove', { method: 'POST', body: { id: 'status-test' } })).status, 401);
+    const first = await login('a@example.test'), second = await login('b@example.test');
+    const aCookie = first.cookie.split(';')[0], bCookie = second.cookie.split(';')[0];
+    const listed = await call('passkey/status', { cookie: aCookie });
+    assert.equal(listed.body.keys[0].id, 'status-test');
+    assert.equal((await call('passkey/remove', { method: 'POST', cookie: bCookie, body: { id: 'status-test' } })).status, 404);
+    assert.equal((await call('passkey/remove', { method: 'POST', cookie: aCookie, body: { id: 'status-test' } })).status, 200);
+    assert.equal((await call('passkey/status', { cookie: aCookie })).body.count, 0);
+});
