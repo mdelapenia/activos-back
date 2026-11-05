@@ -45,12 +45,13 @@ test('solo avisa pagos elegibles dentro del plazo y evita duplicados por disposi
         if (name === 'push_deliveries') return { insertOne: async row => { if (deliveries.has(row._id)) throw Object.assign(new Error('duplicate'), { code: 11000 }); deliveries.add(row._id); }, deleteOne: async row => deliveries.delete(row._id) };
         throw new Error(name);
     } };
-    const loadDividends = async () => ({ configured: true, items: [{ status: 'ok', kind: 'cedear', ticker: 'itub', events: [{ payDate: '2026-11-10', eligible: true }, { payDate: '2026-11-11', eligible: false }, { payDate: '2026-12-10', eligible: true }] }] });
+    const loadDividends = async () => ({ configured: true, items: [{ status: 'ok', kind: 'cedear', ticker: 'itub', events: [{ payDate: '2026-11-10', eligible: true, estimatedGross: 1.25 }, { payDate: '2026-11-11', eligible: false }, { payDate: '2026-12-10', eligible: true }] }, { status: 'ok', kind: 'cedear', ticker: 'ITUB', events: [{ payDate: '2026-11-10', eligible: true, estimatedGross: 2.5 }] }] });
     const deliver = async (_db, _row, payload) => { sent.push(payload); };
     await checkDividendPush(db, env, Date.parse('2026-11-05T15:00:00Z'), { loadDividends, deliver });
     await checkDividendPush(db, env, Date.parse('2026-11-05T15:00:00Z'), { loadDividends, deliver });
     assert.equal(sent.length, 1);
     assert.match(sent[0].body, /10\/11\/2026/);
+    assert.match(sent[0].body, /Estimado bruto:.*3,75/);
 });
 
 test('rechaza destinos de push ajenos a proveedores admitidos', async () => {
@@ -92,4 +93,30 @@ test('la prueba de precio identifica el activo y el umbral sin activar una alert
     assert.match(received.title, /Bitcoin/);
     assert.match(received.body, /Prueba:.*80\.000/);
     assert.equal(received.url, '/precios');
+});
+
+test('la prueba de dividendo suma el importe elegible de las posiciones del activo', async () => {
+    const portfolio = { alerts: [{ id: 'itub', kind: 'dividend', assetKind: 'cedear', assetId: 'ITUB', assetName: 'ITUB' }], investments: [] };
+    const db = { collection(name) {
+        if (name === 'push_subscriptions') return { findOne: async () => ({ _id: 'device' }) };
+        if (name === 'portfolios') return { findOne: async () => ({ portfolio }) };
+        throw new Error(name);
+    } };
+    const result = { items: [
+        { status: 'ok', kind: 'cedear', ticker: 'ITUB', events: [{ payDate: '2099-12-08', eligible: true, estimatedGross: 1.25 }] },
+        { status: 'ok', kind: 'cedear', ticker: 'ITUB', events: [{ payDate: '2099-12-08', eligible: true, estimatedGross: 2.5 }] },
+        { status: 'ok', kind: 'cedear', ticker: 'ITUB', events: [{ payDate: '2099-12-08', eligible: false, estimatedGross: 99 }] },
+    ] };
+    let received;
+    await testPush(db, { _id: 'user' }, 'https://example.com', env, 'itub', async (_db, _row, payload) => { received = payload; return true; }, async () => result);
+    assert.match(received.body, /Prueba: pago anunciado/);
+    assert.match(received.body, /08\/12\/2099/);
+    assert.match(received.body, /Estimado bruto:.*3,75/);
+});
+
+test('la prueba de dividendo aclara cuando no se puede consultar el importe', async () => {
+    const db = { collection: name => name === 'push_subscriptions' ? { findOne: async () => ({ _id: 'device' }) } : { findOne: async () => ({ portfolio: { alerts: [{ id: 'itub', kind: 'dividend', assetKind: 'cedear', assetId: 'ITUB', assetName: 'ITUB' }] } }) } };
+    let received;
+    await testPush(db, { _id: 'user' }, 'https://example.com', env, 'itub', async (_db, _row, payload) => { received = payload; return true; }, async () => { throw new Error('provider'); });
+    assert.match(received.body, /no se pudo consultar/);
 });

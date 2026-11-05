@@ -55,10 +55,10 @@ export async function sendPush(db, row, payload, env) {
     try { await webpush.sendNotification(row.subscription, JSON.stringify(payload), { vapidDetails: config, TTL: 86400 }); return true; }
     catch (error) { if (error.statusCode === 404 || error.statusCode === 410) { await db.collection('push_subscriptions').deleteOne({ _id: row._id }); return false; } throw error; }
 }
-export async function testPush(db, user, endpoint, env, alertId, deliver = sendPush) {
+export async function testPush(db, user, endpoint, env, alertId, deliver = sendPush, loadDividends = portfolioDividends) {
     const row = typeof endpoint === 'string' && await db.collection('push_subscriptions').findOne({ _id: digest(endpoint), userId: user._id });
     if (!row) throw new HttpError(404, 'Activá las notificaciones en este dispositivo primero.');
-    let payload = { title: 'Alza · notificación de prueba', body: 'Así te avisaremos cuando se acerque un dividendo de tu cartera.', url: '/dividendos' };
+    let payload = { title: '🔔 Alza · notificación de prueba', body: '💰 Así te avisaremos cuando se acerque un dividendo de tu cartera.', url: '/dividendos' };
     if (alertId !== undefined) {
         const { portfolio } = await readPortfolio(db, user._id);
         const alert = (portfolio.alerts || []).find(item => item.id === alertId && (item.kind === 'dividend' || item.kind === 'price'));
@@ -66,8 +66,26 @@ export async function testPush(db, user, endpoint, env, alertId, deliver = sendP
         if (alert.kind === 'price') {
             const currency = ['cedear', 'arg-stock', 'bond', 'fund'].includes(alert.assetKind) ? 'ARS' : 'USD';
             const price = new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 6 }).format(alert.threshold);
-            payload = { title: `Precio · ${alert.assetName}`, body: `Prueba: ${alert.assetName} alcanzó ${alert.direction === 'above' ? 'o superó' : 'o bajó de'} ${price}.`, url: '/precios' };
-        } else payload = { title: `Dividendo · ${alert.assetName}`, body: 'Prueba: así te avisaremos cuando se acerque el pago de este dividendo.', url: '/dividendos' };
+            payload = { title: `Precio · ${alert.assetName}`, body: `Prueba: ${alert.assetName} alcanzó ${alert.direction === 'above' ? 'o superó' : 'o bajó de'} ${price}. 💸`, url: '/precios' };
+        } else {
+            let body = '🧪 Prueba: no hay un próximo pago con importe disponible para calcular.';
+            try {
+                const result = await loadDividends(portfolio, env.MASSIVE_API_KEY);
+                const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+                const positions = (result.items || []).filter(item => item.kind === alert.assetKind && item.ticker.toUpperCase() === alert.assetId.toUpperCase());
+                const events = positions.filter(item => item.status === 'ok').flatMap(item => item.events || []).filter(event => event.eligible && event.payDate >= today).sort((a, b) => a.payDate.localeCompare(b.payDate));
+                if (events.length && positions.every(item => item.status === 'ok')) {
+                    const payments = events.filter(event => event.payDate === events[0].payDate);
+                    if (payments.every(event => Number.isFinite(event.estimatedGross) && event.estimatedGross >= 0)) {
+                        const total = payments.reduce((sum, event) => sum + event.estimatedGross, 0);
+                        const amount = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(total);
+                        const date = events[0].payDate.split('-').reverse().join('/');
+                        body = `🧪 Prueba: ${payments.some(event => event.estimated) ? 'pago estimado' : 'pago anunciado'} para el ${date}. 💰 Estimado bruto: ${amount}.`;
+                    }
+                }
+            } catch { body = '🧪 Prueba: no se pudo consultar el próximo pago para calcular el importe.'; }
+            payload = { title: `💸 Dividendo · ${alert.assetName}`, body, url: '/dividendos' };
+        }
     }
     if (!await deliver(db, row, payload, env)) throw new HttpError(410, 'La suscripción venció. Activá las notificaciones otra vez.');
 }
@@ -87,18 +105,28 @@ export async function checkDividendPush(db, env, now = Date.now(), { loadDividen
             const result = await loadDividends(portfolio, env.MASSIVE_API_KEY);
             if (!result.configured) continue;
             for (const alert of alerts) {
-                const matching = result.items.filter(item => item.status === 'ok' && item.kind === alert.assetKind && item.ticker.toUpperCase() === alert.assetId.toUpperCase());
+                const positions = result.items.filter(item => item.kind === alert.assetKind && item.ticker.toUpperCase() === alert.assetId.toUpperCase());
+                const matching = positions.filter(item => item.status === 'ok');
                 const events = matching.flatMap(item => item.events || []).filter(event => {
                     const daysUntil = (Date.parse(`${event.payDate}T00:00:00Z`) - todayMs) / 86400000;
                     if (!event.eligible || daysUntil < 0 || daysUntil > alert.threshold) return false;
                     const applicable = alerts.filter(other => other.assetKind === alert.assetKind && other.assetId.toUpperCase() === alert.assetId.toUpperCase() && other.threshold >= daysUntil);
                     return alert.threshold === Math.min(...applicable.map(other => other.threshold));
                 });
-                for (const event of events) for (const row of rows) {
+                const grouped = new Map();
+                for (const event of events) {
+                    const group = grouped.get(event.payDate) || { payDate: event.payDate, estimated: false, total: 0, complete: positions.every(item => item.status === 'ok') };
+                    group.estimated ||= Boolean(event.estimated);
+                    if (Number.isFinite(event.estimatedGross) && event.estimatedGross >= 0) group.total += event.estimatedGross;
+                    else group.complete = false;
+                    grouped.set(event.payDate, group);
+                }
+                for (const event of grouped.values()) for (const row of rows) {
                     const id = digest(`${row._id}:${alert.id}:${event.payDate}`);
                     try {
                         await db.collection('push_deliveries').insertOne({ _id: id, createdAt: new Date(now) });
-                        try { await deliver(db, row, { title: `Dividendo · ${alert.assetName}`, body: `${event.estimated ? 'Pago estimado' : 'Pago anunciado'} para el ${event.payDate.split('-').reverse().join('/')}.`, url: '/dividendos' }, env); }
+                        const amount = event.complete ? ` 💰 Estimado bruto: ${new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(event.total)}.` : '';
+                        try { await deliver(db, row, { title: `💸 Dividendo · ${alert.assetName}`, body: `📅 ${event.estimated ? 'Pago estimado' : 'Pago anunciado'} para el ${event.payDate.split('-').reverse().join('/')}.${amount}`, url: '/dividendos' }, env); }
                         catch (error) { await db.collection('push_deliveries').deleteOne({ _id: id }); throw error; }
                     } catch (error) { if (error.code !== 11000) console.error('No se pudo enviar una alerta de dividendos:', error.message); }
                 }
