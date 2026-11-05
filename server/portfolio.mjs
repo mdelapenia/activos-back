@@ -13,14 +13,15 @@ export function validatePortfolio(raw) {
     if (!raw || !Array.isArray(raw.investments) || raw.investments.length > 5000) return invalid();
     const ids = new Set();
     const investments = raw.investments.map(i => {
-        if (!i || !text(i.id, 128) || ids.has(i.id) || !text(i.name, 70) || !positive(i.amount)) return invalid();
+        if (!i || !text(i.id, 128) || ids.has(i.id) || !text(i.name, 70) || !(positive(i.amount) || (i.kind === 'crypto' && i.costUnknown === true && i.amount === 0))) return invalid();
+        if (i.costUnknown !== undefined && (i.costUnknown !== true || i.kind !== 'crypto' || i.amount !== 0)) return invalid();
         ids.add(i.id);
         if (!['USD', 'ARS'].includes(i.currency) || !['rate', 'cedear', 'crypto', 'stock', 'arg-stock', 'bond', 'fund'].includes(i.kind)) return invalid();
         if ((i.kind === 'stock' && i.currency !== 'USD') || (['arg-stock', 'bond', 'fund'].includes(i.kind) && i.currency !== 'ARS')) return invalid();
         if (typeof i.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(i.date)) return invalid();
         const date = new Date(`${i.date}T12:00:00Z`);
         if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== i.date) return invalid();
-        const item = { id: i.id, name: i.name.trim(), amount: i.amount, currency: i.currency, date: i.date, kind: i.kind };
+        const item = { id: i.id, name: i.name.trim(), amount: i.amount, currency: i.currency, date: i.date, kind: i.kind, ...(i.costUnknown === true ? { costUnknown: true } : {}) };
         if (i.kind === 'rate') {
             if (typeof i.rate !== 'number' || !Number.isFinite(i.rate) || i.rate <= -100 || !['month', 'year'].includes(i.period)) return invalid();
             if (i.maturityDate != null) {

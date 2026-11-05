@@ -2,6 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyPortfolio, validatePortfolio, readPortfolio, writePortfolio } from '../server/portfolio.mjs';
 
+test('preserva posiciones cripto importadas con costo desconocido', () => {
+    const portfolio = emptyPortfolio();
+    const investment = { id: 'wallet-sol', name: 'Solana', kind: 'crypto', coin: 'solana', units: 0.004, currency: 'USD', amount: 0, costUnknown: true, date: '2026-11-05' };
+    portfolio.investments = [investment];
+    assert.deepEqual(validatePortfolio(portfolio).investments[0], investment);
+    assert.throws(() => validatePortfolio({ ...portfolio, investments: [{ ...investment, costUnknown: undefined }] }));
+    assert.throws(() => validatePortfolio({ ...portfolio, investments: [{ ...investment, amount: 10 }] }));
+});
+
 test('conserva ventas y preferencias del panel, y rechaza valores inválidos', () => {
     const portfolio = emptyPortfolio();
     portfolio.preferences.panels = ['inflation', 'investments'];
