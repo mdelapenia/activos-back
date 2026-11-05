@@ -146,10 +146,12 @@ function dividendPushPayload(alert, event, now = Date.now(), test = false) {
     const amount = event.complete
         ? ` Estimado bruto: ${new Intl.NumberFormat('es-AR', {
             style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4
-        }).format(event.total)}. 💰`
+        }).format(event.total)} 💰. `
         : '';
     return {
-        title: `${test ? '🧪 ' : ''}💸 Dividendo · ${alert.assetName}`,
+        title: test
+            ? `🧪 Dividendo · ${alert.assetName}`
+            : `💸 Dividendo · ${alert.assetName}`,
         body: `🗓️ ${event.estimated ? 'Pago estimado' : 'Pago anunciado'} ${dividendPaymentWhen(event.payDate, now)}.${amount}`,
         url: '/dividendos'
     };
