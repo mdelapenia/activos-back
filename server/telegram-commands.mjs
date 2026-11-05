@@ -9,7 +9,7 @@ const names = { crypto: 'Cripto', stock: 'Acciones', cedear: 'CEDEARs', 'arg-sto
 const money = (amount, currency) => Number.isFinite(amount) ? new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount) : 'No disponible';
 const number = value => Number.isFinite(value) ? new Intl.NumberFormat('es-AR', { maximumSignificantDigits: 10 }).format(value) : 'No disponible';
 const today = now => new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
-const HELP = '🛟 Comandos disponibles:\n/menu — botones principales\n/clear — borrar hasta 100 mensajes recientes (48 horas)\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/wallets — direcciones y saldos\n/distribucion — cartera por tipo\n/alza — abrir Alza\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
+const HELP = '🛟 Comandos disponibles:\n/menu — botones principales\n/clear — borrar mensajes recientes (hasta 48 horas)\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/wallets — direcciones y saldos\n/distribucion — cartera por tipo\n/alza — abrir Alza\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
 
 async function dollarRates(fetcher) {
     const response = await fetcher('https://dolarapi.com/v1/dolares', { signal: AbortSignal.timeout(12000) });
@@ -85,8 +85,8 @@ export async function telegramCommand(db, userId, command, argument, env, { fetc
             const header = `${wallet.label || 'Wallet'} · ${wallet.network}\n${wallet.address}`;
             if (result.status !== 'fulfilled') return `${header}\nNo se pudo consultar el saldo de esta red.`;
             const list = result.value.holdings;
-            if (!list.length) return `${header}\nSin saldos detectados.`;
-            return `${header}\n${list.slice(0, 15).map(item => `${item.name}${item.symbol ? ` (${item.symbol})` : ''}: ${number(item.units)}${item.key !== 'native' ? ` · contrato ${item.key}` : ''}`).join('\n')}${list.length > 15 || result.value.truncated ? '\nLa lista de tokens está incompleta; revisá la wallet.' : ''}`;
+            if (!list.length) return `${header}\n${result.value.notice ? `Sin saldo nativo detectado.\n${result.value.notice}` : 'Sin saldos detectados.'}`;
+            return `${header}\n${list.slice(0, 15).map(item => `${item.name}${item.symbol ? ` (${item.symbol})` : ''}: ${number(item.units)}${item.key !== 'native' ? ` · contrato ${item.key}` : ''}`).join('\n')}${list.length > 15 || result.value.truncated ? '\nLa lista de tokens está incompleta; revisá la wallet.' : ''}${result.value.notice ? `\n${result.value.notice}` : ''}`;
         });
         return `💳 Tus wallets (${saved.length}) · página ${page}/${pages}\n\n${lines.join('\n\n')}${page < pages ? `\n\nMás wallets: /wallets ${page + 1}` : ''}`;
     }

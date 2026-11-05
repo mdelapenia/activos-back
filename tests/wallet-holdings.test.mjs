@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { walletAddresses, walletHoldings } from '../server/wallets.mjs';
+import { address as bitcoinCodec } from 'bitcoinjs-lib';
 
 test('consulta solo una wallet del usuario y normaliza moneda nativa y tokens', async () => {
     const user = { _id: 'user-a' };
@@ -40,4 +41,39 @@ test('las nuevas redes usan su explorador y moneda nativa', async () => {
         const result = await walletHoldings(db, { _id: 'user' }, 'wallet', fetcher);
         assert.equal(result.holdings[0].symbol, symbol);
     }
+});
+
+test('Bitcoin valida direcciones mainnet y consulta el saldo confirmado en BTC', async () => {
+    const saved = [];
+    const db = { collection: () => ({ insertOne: async doc => { if (saved.some(row => row._id === doc._id)) throw Object.assign(new Error(), { code: 11000 }); saved.push(doc); }, find: () => ({ toArray: async () => saved }), findOne: async query => saved.find(row => row.userId === query.userId && row.id === query.id) }) };
+    const user = { _id: 'user' };
+    const legacy = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
+    const segwit = bitcoinCodec.toBech32(Buffer.alloc(20, 1), 0, 'bc');
+    const taproot = bitcoinCodec.toBech32(Buffer.alloc(32, 2), 1, 'bc');
+    for (const address of [legacy, segwit, taproot]) await walletAddresses(db, user, 'POST', { network: 'bitcoin', address });
+    assert.ok(saved[0]._id.endsWith(legacy));
+    await assert.rejects(walletAddresses(db, user, 'POST', { network: 'bitcoin', address: segwit.toUpperCase() }), { status: 409 });
+    for (const address of ['not-an-address', '1BoatSLRHtKNngkdXEeobR76b53LETtpyU', bitcoinCodec.toBech32(Buffer.alloc(20, 1), 0, 'tb')]) await assert.rejects(walletAddresses(db, user, 'POST', { network: 'bitcoin', address }), { status: 400 });
+    const fetcher = async url => { assert.equal(url, `https://mempool.space/api/address/${legacy}`); return { ok: true, json: async () => ({ chain_stats: { funded_txo_sum: 250000000, spent_txo_sum: 50000000 }, mempool_stats: { funded_txo_sum: 100000000 } }) }; };
+    assert.deepEqual(await walletHoldings(db, user, saved[0].id, fetcher), { holdings: [{ key: 'native', name: 'Bitcoin', symbol: 'BTC', units: 2, coin: 'bitcoin' }], truncated: false });
+    await assert.rejects(walletHoldings(db, { _id: 'other' }, saved[0].id, fetcher), { status: 404 });
+    await assert.rejects(walletHoldings(db, user, saved[0].id, async () => ({ ok: true, json: async () => ({ chain_stats: {} }) })), { status: 503 });
+});
+
+test('BNB consulta saldo nativo por RPC y avisa que no incluye tokens', async () => {
+    const address = '0x' + '1'.repeat(40);
+    const db = { collection: () => ({ findOne: async () => ({ network: 'bnb', address }) }) };
+    let calls = 0;
+    const fetcher = async (url, options) => {
+        calls++;
+        assert.match(url, /^https:\/\/bsc-dataseed/);
+        assert.deepEqual(JSON.parse(options.body).params, [address, 'latest']);
+        return calls === 1 ? { ok: false } : { ok: true, json: async () => ({ result: '0xde0b6b3a7640000' }) };
+    };
+    const result = await walletHoldings(db, { _id: 'user' }, 'wallet', fetcher);
+    assert.equal(result.holdings[0].units, 1);
+    assert.equal(result.holdings[0].coin, 'binancecoin');
+    assert.match(result.notice, /tokens/);
+    assert.equal(calls, 2);
+    await assert.rejects(walletHoldings(db, { _id: 'user' }, 'wallet', async () => ({ ok: true, json: async () => ({ result: 'invalid' }) })), { status: 503 });
 });

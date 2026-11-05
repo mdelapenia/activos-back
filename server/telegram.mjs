@@ -86,9 +86,16 @@ export async function telegramWebhook(db, env, header, body, now = Date.now(), {
 }
 
 export async function clearTelegramMessages(chatId, messageId, env, fetcher = fetch) {
-    const first = Math.max(1, messageId - 99);
-    const messageIds = Array.from({ length: messageId - first + 1 }, (_, index) => first + index);
-    await telegramCall(env, 'deleteMessages', { chat_id: chatId, message_ids: messageIds }, fetcher);
+    // Telegram does not expose chat history, so inspect a bounded window of recent IDs.
+    const first = Math.max(1, messageId - 999);
+    let succeeded = false, lastError;
+    for (let end = messageId; end >= first; end -= 100) {
+        const start = Math.max(first, end - 99);
+        const messageIds = Array.from({ length: end - start + 1 }, (_, index) => start + index);
+        try { await telegramCall(env, 'deleteMessages', { chat_id: chatId, message_ids: messageIds }, fetcher); succeeded = true; }
+        catch (error) { lastError = error; }
+    }
+    if (!succeeded) throw lastError;
 }
 
 export async function telegramDisconnect(db, user) {
