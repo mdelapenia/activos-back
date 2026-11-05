@@ -66,9 +66,13 @@ export async function testPush(db, user, endpoint, env, alertId, deliver = sendP
         if (alert.kind === 'price') {
             const currency = ['cedear', 'arg-stock', 'bond', 'fund'].includes(alert.assetKind) ? 'ARS' : 'USD';
             const price = new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 6 }).format(alert.threshold);
+
             payload = {
-                title: `💸 Precio · ${alert.assetName}`, body: `🧪 Prueba: ${alert.assetName} alcanzó ${alert.direction === 'above' ? 'o superó' : 'o bajó de'} ${price}. + ${alert.direction === 'above' ? '📈' : '📉'}`, url: '/precios'
+                title: `💸 Precio · ${alert.assetName}`,
+                body: `🧪 Prueba: ${alert.assetName} ${alert.direction === 'above' ? '📈' : '📉'} alcanzó ${alert.direction === 'above' ? 'o superó' : 'o bajó de'} ${price}.`,
+                url: '/precios'
             };
+
         } else {
             let body = '🧪 Prueba: no hay un próximo pago con importe disponible para calcular.';
             try {
