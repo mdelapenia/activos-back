@@ -4,7 +4,7 @@ import { telegramCommand } from './telegram-commands.mjs';
 import { telegramGraph } from './telegram-graphs.mjs';
 
 const MENU = { keyboard: [[{ text: '💼 Mi cartera' }, { text: '💱 Precios' }], [{ text: '💳 Wallets' }, { text: '🔔 Alertas' }], [{ text: '📊 Gráfico de distribución' }, { text: '📈 Gráfico de activo' }], [{ text: '🌐 Abrir Alza' }, { text: '🛟 Ayuda' }]], resize_keyboard: true, is_persistent: true };
-const menuCommands = { '💼 Mi cartera': '/cartera', '💱 Precios': '/precio', '👛 Wallets': '/wallets', '🔔 Alertas': '/alertas', '📊 Gráfico de distribución': '/grafico distribucion', '📈 Gráfico de activo': '/grafico', '🌐 Abrir Alza': '/alza', '❔ Ayuda': '/ayuda' };
+const menuCommands = { '💼 Mi cartera': '/cartera', '💱 Precios': '/precio', '💳 Wallets': '/wallets', '🔔 Alertas': '/alertas', '📊 Gráfico de distribución': '/grafico distribucion', '📈 Gráfico de activo': '/grafico', '🌐 Abrir Alza': '/alza', '🛟 Ayuda': '/ayuda' };
 function appLinks(env, command, argument) {
     let origin; try { const url = new URL(env.APP_ORIGIN || 'https://activos-nu.vercel.app'); if (url.protocol === 'https:') origin = url.origin; } catch { /* No safe application URL. */ }
     if (!origin) return undefined;

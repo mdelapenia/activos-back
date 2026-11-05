@@ -81,6 +81,16 @@ export async function telegramGraph(db, userId, argument, { fetcher = fetch, now
         ctx.textAlign = i === 0 ? 'left' : i === 4 ? 'right' : 'center';
         ctx.fillText(new Date(timestamp).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'UTC' }), x, 620);
     }
+    const samples = [points[0], points[Math.floor((points.length - 1) / 2)], points.at(-1)];
+    samples.forEach((point, index) => {
+        const x = left + (point.time - points[0].time) / (points.at(-1).time - points[0].time || 1) * (right - left);
+        const y = bottom - (point.price - min) / (max - min) * (bottom - top);
+        ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = '#e8fff2'; ctx.fill();
+        ctx.textAlign = index === 0 ? 'left' : index === 2 ? 'right' : 'center';
+        ctx.fillStyle = '#a6b8ae'; ctx.font = '17px sans-serif';
+        ctx.fillText(new Date(point.time).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', timeZone: 'UTC' }), x, 658);
+        ctx.fillStyle = '#f1f4f1'; ctx.font = 'bold 20px sans-serif'; ctx.fillText(`${unit} ${fmt(point.price)}`, x, 684);
+    });
     const lastDate = new Date(points.at(-1).time).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
     return { png: image.toBuffer('image/png'), caption: `${asset.name} · últimos 30 días. Último dato: ${unit} ${fmt(points.at(-1).price)} (${lastDate}). Las cotizaciones pueden estar demoradas.` };
 }
