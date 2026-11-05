@@ -134,21 +134,23 @@ function pricePushPayload(alert, price, test = false) {
     }).format(value);
     const above = alert.direction === 'above';
     return {
-        title: `${test ? '🧪 ' : ''}${above ? '📈' : '📉'} ${alert.assetName} · Alerta de precio`,
-        body: `${above ? 'Alcanzó o superó' : 'Alcanzó o cayó por debajo de'} ${format(price)}. 🎯 Tu objetivo era ${format(alert.threshold)}.`,
+        title: test
+            ? `🧪 ${alert.assetName} · Alerta de precio`
+            : `${above ? '📈' : '📉'} ${alert.assetName} · Alerta de precio`,
+        body: `${above ? 'Alcanzó o superó' : 'Alcanzó o cayó por debajo de'} ${format(price)}. Tu objetivo era ${format(alert.threshold)}. 🎯`,
         url: '/precios'
     };
 }
 
 function dividendPushPayload(alert, event, now = Date.now(), test = false) {
     const amount = event.complete
-        ? ` 💰 Estimado bruto: ${new Intl.NumberFormat('es-AR', {
+        ? ` Estimado bruto: ${new Intl.NumberFormat('es-AR', {
             style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4
-        }).format(event.total)}.`
+        }).format(event.total)}. 💰`
         : '';
     return {
         title: `${test ? '🧪 ' : ''}💸 Dividendo · ${alert.assetName}`,
-        body: `📅 ${event.estimated ? 'Pago estimado' : 'Pago anunciado'} ${dividendPaymentWhen(event.payDate, now)}.${amount}`,
+        body: `🗓️ ${event.estimated ? 'Pago estimado' : 'Pago anunciado'} ${dividendPaymentWhen(event.payDate, now)}.${amount}`,
         url: '/dividendos'
     };
 }
@@ -157,7 +159,7 @@ export async function testPush(db, user, endpoint, env, alertId, deliver = sendP
     const row = typeof endpoint === 'string' && await db.collection('push_subscriptions').findOne({ _id: digest(endpoint), userId: user._id });
     if (!row) throw new HttpError(404, 'Activá las notificaciones en este dispositivo primero.');
 
-    let payload = { title: '🧪 🔔 Notificación de prueba', body: 'Las notificaciones están funcionando correctamente.', url: '/precios' };
+    let payload = { title: '🧪 Notificación de prueba', body: 'Las notificaciones están funcionando correctamente. ✅', url: '/precios' };
 
     if (alertId !== undefined) {
         const { portfolio } = await readPortfolio(db, user._id);
