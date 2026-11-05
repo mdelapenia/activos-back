@@ -23,7 +23,8 @@
     "@tesseract.js-data/spa": "^1.0.0",
     "mongodb": "^7.8.0",
     "pdfjs-dist": "^6.5.438",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "mongodb-memory-server": "^11.3.0"
