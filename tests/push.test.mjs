@@ -1,8 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkDividendPush, saveSubscription, testPush, isQuietHours, removeSubscription, pushConfig } from '../server/push.mjs';
+import { checkDividendPush, saveSubscription, testPush, isQuietHours, removeSubscription, pushConfig, dividendPaymentWhen } from '../server/push.mjs';
 
 const env = { VAPID_PUBLIC_KEY: 'public', VAPID_PRIVATE_KEY: 'private', VAPID_SUBJECT: 'https://example.com', MASSIVE_API_KEY: 'test' };
+test('describe la fecha relativa según el día en Argentina', () => {
+    const now = Date.parse('2026-12-08T02:00:00Z');
+    assert.equal(dividendPaymentWhen('2026-12-07', now), 'hoy (07/12/2026)');
+    assert.equal(dividendPaymentWhen('2026-12-08', now), 'mañana (08/12/2026)');
+    assert.equal(dividendPaymentWhen('2026-12-14', now), 'en 1 semana (14/12/2026)');
+    assert.equal(dividendPaymentWhen('2026-12-21', now), 'en 2 semanas (21/12/2026)');
+    assert.equal(dividendPaymentWhen('2026-12-10', now), 'en 3 días (10/12/2026)');
+});
 test('genera y reutiliza un único par VAPID en la base ante inicios simultáneos', async () => {
     let stored;
     const db = { collection: name => {
