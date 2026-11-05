@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { walletAddresses, walletHoldings } from '../server/wallets.mjs';
+import { detectWalletNetworks, previewWalletHoldings, walletAddresses, walletHoldings } from '../server/wallets.mjs';
 import { address as bitcoinCodec } from 'bitcoinjs-lib';
 
 test('consulta solo una wallet del usuario y normaliza moneda nativa y tokens', async () => {
@@ -76,4 +76,20 @@ test('BNB consulta saldo nativo por RPC y avisa que no incluye tokens', async ()
     assert.match(result.notice, /tokens/);
     assert.equal(calls, 2);
     await assert.rejects(walletHoldings(db, { _id: 'user' }, 'wallet', async () => ({ ok: true, json: async () => ({ result: 'invalid' }) })), { status: 503 });
+});
+
+test('detecta Bitcoin y Solana y ofrece todas las redes posibles para direcciones EVM', () => {
+    assert.deepEqual(detectWalletNetworks('1BoatSLRHtKNngkdXEeobR76b53LETtpyT').networks, ['bitcoin']);
+    assert.deepEqual(detectWalletNetworks('So11111111111111111111111111111111111111112').networks, ['solana']);
+    const evm = detectWalletNetworks('0x' + '1'.repeat(40)).networks;
+    assert.ok(evm.includes('ethereum') && evm.includes('bnb') && evm.includes('base'));
+    assert.deepEqual(detectWalletNetworks('no válida').networks, []);
+});
+
+test('consulta una dirección válida antes de guardarla y distingue saldo cero de error', async () => {
+    const body = { network: 'bitcoin', address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' };
+    const result = await previewWalletHoldings(body, async () => ({ ok: true, json: async () => ({ chain_stats: { funded_txo_sum: 10, spent_txo_sum: 10 } }) }));
+    assert.deepEqual(result.holdings, []);
+    await assert.rejects(previewWalletHoldings(body, async () => ({ ok: false })), { status: 503 });
+    await assert.rejects(previewWalletHoldings({ ...body, network: 'bnb' }, async () => { throw new Error('No debería consultar'); }), { status: 400 });
 });

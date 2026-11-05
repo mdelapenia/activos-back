@@ -6,15 +6,16 @@ import { alertTestPayload, checkPricePush, checkDividendPush } from '../server/p
 
 const env = { TELEGRAM_BOT_TOKEN: '12345:abc_DEF', TELEGRAM_BOT_USERNAME: 'example_bot', TELEGRAM_WEBHOOK_SECRET: 'a'.repeat(40), TELEGRAM_WEBHOOK_URL: 'https://example.com/api/telegram/webhook' };
 test('vincula un chat privado con código de un solo uso y permite desconectarlo', async () => {
-    let code, subscription, webhookRequest;
+    let code, subscription, webhookRequest, commandsRequest;
     const db = { collection: name => name === 'telegram_link_codes' ? {
         deleteMany: async () => { code = null; }, insertOne: async row => { code = row; },
         findOneAndDelete: async filter => { if (!code || code._id !== filter._id || code.expiresAt <= filter.expiresAt.$gt) return null; const result = code; code = null; return result; },
     } : { updateOne: async (filter, update) => { subscription = { _id: filter._id, ...update.$set }; }, deleteOne: async filter => { if (subscription?._id === filter._id) subscription = null; } } };
-    const fetcher = async (url, options) => { webhookRequest = { url, body: JSON.parse(options.body) }; return { ok: true, json: async () => ({ ok: true, result: true }) }; };
+    const fetcher = async (url, options) => { const request = { url, body: JSON.parse(options.body) }; if (url.endsWith('/setWebhook')) webhookRequest = request; else if (url.endsWith('/setMyCommands')) commandsRequest = request; return { ok: true, json: async () => ({ ok: true, result: true }) }; };
     const { url } = await telegramConnect(db, { _id: 'alice' }, env, 1000, fetcher);
     const token = new URL(url).searchParams.get('start');
     assert.equal(code._id, digest(token)); assert.equal(webhookRequest.body.secret_token, env.TELEGRAM_WEBHOOK_SECRET);
+    assert.ok(commandsRequest.body.commands.some(command => command.command === 'wallets'));
     const update = { message: { chat: { id: 123, type: 'private' }, from: { id: 123 }, text: `/start ${token}` } };
     await assert.rejects(telegramWebhook(db, env, 'incorrecto', update, 2000), { status: 403 });
     await telegramWebhook(db, env, env.TELEGRAM_WEBHOOK_SECRET, { message: { ...update.message, chat: { id: 123, type: 'group' } } }, 2000);

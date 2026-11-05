@@ -50,6 +50,13 @@ function solanaAddress(address) {
     return bytes + (address.match(/^1*/)?.[0].length ?? 0) === 32;
 }
 
+export function detectWalletNetworks(value) {
+    const address = typeof value === 'string' ? value.trim() : '';
+    if (address.length > 90) return { networks: [] };
+    if (/^0x[0-9a-fA-F]{40}$/.test(address)) return { networks: Object.keys(explorers) };
+    return { networks: [...(bitcoinAddress(address) ? ['bitcoin'] : []), ...(solanaAddress(address) ? ['solana'] : [])] };
+}
+
 async function solanaHoldings(address, fetcher) {
     async function rpc(method, params) {
         let response, data;
@@ -74,6 +81,16 @@ async function solanaHoldings(address, fetcher) {
 
 export async function walletHoldings(db, user, id, fetcher = fetch) {
     const wallet = typeof id === 'string' && await db.collection('wallet_addresses').findOne({ userId: user._id, id });
+    return holdingsForWallet(wallet, fetcher);
+}
+
+export async function previewWalletHoldings(body, fetcher = fetch) {
+    const address = typeof body?.address === 'string' ? body.address.trim() : '';
+    if (!detectWalletNetworks(address).networks.includes(body?.network)) throw new HttpError(400, 'Ingresá una dirección pública válida para la red seleccionada.');
+    return holdingsForWallet({ address, network: body.network }, fetcher);
+}
+
+async function holdingsForWallet(wallet, fetcher) {
     if (!wallet || (wallet.network !== 'solana' && wallet.network !== 'bitcoin' && !Object.hasOwn(explorers, wallet.network))) throw new HttpError(404, 'No se encontró la wallet.');
     if (wallet.network === 'bitcoin') return bitcoinHoldings(wallet.address, fetcher);
     if (wallet.network === 'bnb') return bnbHoldings(wallet.address, fetcher);

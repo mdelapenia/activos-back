@@ -3,6 +3,21 @@ import { digest, HttpError, newToken } from './security.mjs';
 import { telegramCommand } from './telegram-commands.mjs';
 
 const MENU = { keyboard: [[{ text: '💼 Mi cartera' }], [{ text: '💳 Wallets' }, { text: '🔔 Alertas' }], [{ text: '🌐 Abrir Alza' }, { text: '🛟 Ayuda' }]], resize_keyboard: true, is_persistent: true };
+const COMMANDS = [
+    { command: 'cartera', description: 'Ver el valor y rendimiento de mi cartera' },
+    { command: 'activos', description: 'Ver mis inversiones' },
+    { command: 'activo', description: 'Consultar un activo por nombre o símbolo' },
+    { command: 'wallets', description: 'Consultar mis wallets y saldos' },
+    { command: 'distribucion', description: 'Ver la distribución de mi cartera' },
+    { command: 'dividendos', description: 'Ver próximos dividendos' },
+    { command: 'alertas', description: 'Ver mis alertas' },
+    { command: 'dolar', description: 'Consultar cotizaciones del dólar' },
+    { command: 'precio', description: 'Abrir precios de un activo' },
+    { command: 'alza', description: 'Abrir Alza' },
+    { command: 'menu', description: 'Mostrar el menú de opciones' },
+    { command: 'ayuda', description: 'Ver todos los comandos' },
+    { command: 'clear', description: 'Borrar mensajes recientes del chat' },
+];
 const menuCommands = { '💼 Mi cartera': '/cartera', '💳 Wallets': '/wallets', '🔔 Alertas': '/alertas', '🌐 Abrir Alza': '/alza', '🛟 Ayuda': '/ayuda' };
 function appLinks(env, command, argument) {
     let origin; try { const url = new URL(env.APP_ORIGIN || 'https://activos-nu.vercel.app'); if (url.protocol === 'https:') origin = url.origin; } catch { /* No safe application URL. */ }
@@ -28,6 +43,10 @@ async function telegramCall(env, method, body, fetcher = fetch) {
     return data.result;
 }
 
+export async function registerTelegramCommands(env, fetcher = fetch) {
+    await telegramCall(env, 'setMyCommands', { commands: COMMANDS }, fetcher);
+}
+
 export async function telegramStatus(db, user, env) {
     const configured = Boolean(config(env).configured);
     const row = await db.collection('telegram_subscriptions').findOne({ _id: user._id });
@@ -38,13 +57,14 @@ export async function telegramConnect(db, user, env, now = Date.now(), fetcher =
     const settings = config(env);
     if (!settings.configured) throw new HttpError(503, 'Telegram todavía no está configurado en el servidor.');
     await telegramCall(env, 'setWebhook', { url: settings.webhook, secret_token: settings.secret, allowed_updates: ['message'] }, fetcher);
+    await registerTelegramCommands(env, fetcher);
     const token = newToken();
     await db.collection('telegram_link_codes').deleteMany({ userId: user._id });
     await db.collection('telegram_link_codes').insertOne({ _id: digest(token), userId: user._id, expiresAt: new Date(now + 10 * 60_000) });
     return { url: `https://t.me/${settings.username}?start=${token}` };
 }
 
-export async function telegramWebhook(db, env, header, body, now = Date.now(), { commandReply = telegramCommand, send = sendTelegram, clear = clearTelegramMessages } = {}) {
+export async function telegramWebhook(db, env, header, body, now = Date.now(), { commandReply = telegramCommand, send = sendTelegram, clear = clearTelegramMessages, registerCommands = registerTelegramCommands } = {}) {
     const settings = config(env), expected = Buffer.from(settings.secret), actual = Buffer.from(typeof header === 'string' ? header : '');
     if (!settings.configured || expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new HttpError(403, 'Solicitud no autorizada.');
     const message = body?.message, chat = message?.chat, text = typeof message?.text === 'string' ? message.text.trim() : '';
@@ -72,7 +92,11 @@ export async function telegramWebhook(db, env, header, body, now = Date.now(), {
         if (Number.isSafeInteger(message.message_id) && message.message_id > 0) await clear(chat.id, message.message_id, env);
         return { ok: true };
     }
-    if (action === 'start' || action === 'menu') { await send(db, rows[0], { title: 'Alza', body: 'Elegí una opción del menú o escribí /ayuda.', replyMarkup: MENU }, env); return { ok: true }; }
+    if (action === 'start' || action === 'menu') {
+        let registered = true;
+        try { await registerCommands(env); } catch { registered = false; }
+        await send(db, rows[0], { title: 'Alza', body: registered ? 'Elegí una opción del menú o escribí / para ver los comandos.' : 'Elegí una opción del menú o escribí /ayuda. No se pudo actualizar la lista de comandos; probá /menu de nuevo.', replyMarkup: MENU }, env); return { ok: true };
+    }
     if (action === 'alza') { await send(db, rows[0], { title: 'Alza', body: 'Abrí la sección que quieras:', replyMarkup: appLinks(env, action, argument) }, env); return { ok: true }; }
     if (action === 'precio') { await send(db, rows[0], { title: 'Alza', body: 'Consultá la evolución de precios en la página de Alza.', replyMarkup: appLinks(env, action, argument) }, env); return { ok: true }; }
     const reply = await commandReply(db, user._id, command[1].toLowerCase(), command[2] || '', env, { now });

@@ -6,7 +6,7 @@ const env = { TELEGRAM_BOT_TOKEN: '123:abc', TELEGRAM_BOT_USERNAME: 'example_bot
 test('los botones del menú solo ejecutan consultas del chat autenticado', async () => {
     const responses = [], calls = [];
     const database = { collection: name => name === 'telegram_subscriptions' ? { find: () => ({ limit: () => ({ toArray: async () => [{ userId: 'alice', chatId: '123' }] }) }) } : { findOne: async () => ({ _id: 'alice' }) } };
-    const opts = { send: async (_db, row, payload) => responses.push({ row, payload }), commandReply: async (_db, user, command) => { calls.push({ user, command }); return 'Cartera'; } };
+    const opts = { registerCommands: async () => {}, send: async (_db, row, payload) => responses.push({ row, payload }), commandReply: async (_db, user, command) => { calls.push({ user, command }); return 'Cartera'; } };
     const message = text => ({ message: { chat: { id: 123, type: 'private' }, from: { id: 123 }, text } });
     await telegramWebhook(database, env, env.TELEGRAM_WEBHOOK_SECRET, message('/start'), Date.now(), opts);
     assert.ok(responses[0].payload.replyMarkup.keyboard);
