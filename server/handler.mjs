@@ -11,6 +11,7 @@ import { earningsCalendar } from './market-calendar.mjs';
 import { keySettings, marketChat } from './market-ai.mjs';
 import { stockQuotes, stockHistory } from './stock-quotes.mjs';
 import { pushConfig, saveSubscription, removeSubscription, subscriptionStatus, testPush } from './push.mjs';
+import { walletAddresses } from './wallets.mjs';
 
 const COOKIE = 'activos_session';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
@@ -69,8 +70,9 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
             const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
-            if (!allowed) throw new HttpError(404, 'No se encontró esta operación.');
-            if (!allowed.includes(method)) { res.setHeader('Allow', allowed.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
+            if (!allowed && path !== '/api/wallets') throw new HttpError(404, 'No se encontró esta operación.');
+            const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : allowed;
+            if (!methods.includes(method)) { res.setHeader('Allow', methods.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
             if (method !== 'GET') {
                 const origin = env.APP_ORIGIN || (!production ? 'http://localhost:5173' : '');
@@ -112,6 +114,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 return reply(200, { ok: true });
             }
             const user = await requireUser(db, req, now);
+            if (path === '/api/wallets') return reply(200, await walletAddresses(db, user, method, method === 'GET' ? null : await jsonBody(req)));
             if (path === '/api/push/config') return reply(200, { publicKey: (await pushConfig(db, env)).publicKey });
             if (path === '/api/push/subscribe') { await pushConfig(db, env); await saveSubscription(db, user, await jsonBody(req)); return reply(200, { ok: true }); }
             if (path === '/api/push/unsubscribe') { await removeSubscription(db, user, (await jsonBody(req)).endpoint); return reply(200, { ok: true }); }
