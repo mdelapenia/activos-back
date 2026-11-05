@@ -9,4 +9,4 @@ El webhook se registra al iniciar la vinculación y reemplaza cualquier webhook 
 
 En el chat privado vinculado, `/ayuda` muestra los comandos de consulta: `/cartera`, `/activos`, `/activo SOL`, `/wallets`, `/distribucion`, `/dividendos`, `/alertas` y `/dolar`. `/wallets` muestra hasta 15 tokens por dirección e indica si la lista está incompleta. Los comandos no modifican la cartera. Si una misma cuenta de Telegram está vinculada a más de una cuenta de Alza, las consultas quedan bloqueadas hasta desconectar las demás.
 
-`/menu` abre el teclado de opciones; `/alza` ofrece enlaces a la aplicación. `/grafico distribucion` genera un gráfico de la cartera. Los gráficos se generan en el servidor y se envían como imágenes a Telegram.
+`/clear` intenta borrar hasta 100 mensajes recientes del chat, de las últimas 48 horas. `/menu` abre el teclado de opciones; `/alza` ofrece enlaces a la aplicación.

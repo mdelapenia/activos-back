@@ -1,15 +1,14 @@
 import { timingSafeEqual } from 'node:crypto';
 import { digest, HttpError, newToken } from './security.mjs';
 import { telegramCommand } from './telegram-commands.mjs';
-import { telegramGraph } from './telegram-graphs.mjs';
 
-const MENU = { keyboard: [[{ text: '💼 Mi cartera' }], [{ text: '💳 Wallets' }, { text: '🔔 Alertas' }], [{ text: '📊 Gráfico de distribución' }], [{ text: '🌐 Abrir Alza' }, { text: '🛟 Ayuda' }]], resize_keyboard: true, is_persistent: true };
-const menuCommands = { '💼 Mi cartera': '/cartera', '💳 Wallets': '/wallets', '🔔 Alertas': '/alertas', '📊 Gráfico de distribución': '/grafico distribucion', '🌐 Abrir Alza': '/alza', '🛟 Ayuda': '/ayuda' };
+const MENU = { keyboard: [[{ text: '💼 Mi cartera' }], [{ text: '💳 Wallets' }, { text: '🔔 Alertas' }], [{ text: '🌐 Abrir Alza' }, { text: '🛟 Ayuda' }]], resize_keyboard: true, is_persistent: true };
+const menuCommands = { '💼 Mi cartera': '/cartera', '💳 Wallets': '/wallets', '🔔 Alertas': '/alertas', '🌐 Abrir Alza': '/alza', '🛟 Ayuda': '/ayuda' };
 function appLinks(env, command, argument) {
     let origin; try { const url = new URL(env.APP_ORIGIN || 'https://activos-nu.vercel.app'); if (url.protocol === 'https:') origin = url.origin; } catch { /* No safe application URL. */ }
     if (!origin) return undefined;
     const price = new URL('/precios', origin);
-    if (['activo', 'precio', 'grafico'].includes(command) && argument && !/^distribuci[oó]n$/i.test(argument)) price.searchParams.set('activo', argument);
+    if (['activo', 'precio'].includes(command) && argument && !/^distribuci[oó]n$/i.test(argument)) price.searchParams.set('activo', argument);
     return { inline_keyboard: [[{ text: '💼 Mi cartera', url: `${origin}/mis-inversiones` }, { text: '💱 Precios', url: price.toString() }], [{ text: '🔔 Alertas', url: `${origin}/precios#alertas` }]] };
 }
 
@@ -45,7 +44,7 @@ export async function telegramConnect(db, user, env, now = Date.now(), fetcher =
     return { url: `https://t.me/${settings.username}?start=${token}` };
 }
 
-export async function telegramWebhook(db, env, header, body, now = Date.now(), { commandReply = telegramCommand, send = sendTelegram, graph = telegramGraph, sendPhoto = sendTelegramPhoto } = {}) {
+export async function telegramWebhook(db, env, header, body, now = Date.now(), { commandReply = telegramCommand, send = sendTelegram, clear = clearTelegramMessages } = {}) {
     const settings = config(env), expected = Buffer.from(settings.secret), actual = Buffer.from(typeof header === 'string' ? header : '');
     if (!settings.configured || expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new HttpError(403, 'Solicitud no autorizada.');
     const message = body?.message, chat = message?.chat, text = typeof message?.text === 'string' ? message.text.trim() : '';
@@ -59,7 +58,7 @@ export async function telegramWebhook(db, env, header, body, now = Date.now(), {
         return { ok: true };
     }
     const input = menuCommands[text] || text;
-    const command = input.match(/^\/(start|menu|alza|grafico|cartera|activos|activo|distribucion|dividendos|alertas|dolar|ayuda|wallets|precio)(?:@[A-Za-z0-9_]+)?(?:\s+(.{1,150}))?$/i);
+    const command = input.match(/^\/(start|menu|alza|clear|cartera|activos|activo|distribucion|dividendos|alertas|dolar|ayuda|wallets|precio)(?:@[A-Za-z0-9_]+)?(?:\s+(.{1,150}))?$/i);
     if (!command) return { ok: true };
     const rows = await db.collection('telegram_subscriptions').find({ chatId: String(chat.id) }).limit(2).toArray();
     if (rows.length !== 1) {
@@ -69,15 +68,13 @@ export async function telegramWebhook(db, env, header, body, now = Date.now(), {
     const user = await db.collection('users').findOne({ _id: rows[0].userId, disabled: { $ne: true } }, { projection: { _id: 1 } });
     if (!user) return { ok: true };
     const action = command[1].toLowerCase(), argument = command[2] || '';
-    if (action === 'start' || action === 'menu') { await send(db, rows[0], { title: 'Alza', body: 'Elegí una opción del menú o escribí /ayuda.', replyMarkup: MENU }, env); return { ok: true }; }
-    if (action === 'alza') { await send(db, rows[0], { title: 'Alza', body: 'Abrí la sección que quieras:', replyMarkup: appLinks(env, action, argument) }, env); return { ok: true }; }
-    if (action === 'precio' || (action === 'grafico' && !/^distribuci[oó]n$/i.test(argument.trim()))) { await send(db, rows[0], { title: 'Alza', body: 'Consultá la evolución de precios en la página de Alza.', replyMarkup: appLinks(env, action, argument) }, env); return { ok: true }; }
-    if (action === 'grafico') {
-        const result = await graph(db, user._id, argument, { now });
-        if (result.error) await send(db, rows[0], { title: 'Alza', body: result.error }, env);
-        else await sendPhoto(rows[0], result.png, result.caption, env);
+    if (action === 'clear') {
+        if (Number.isSafeInteger(message.message_id) && message.message_id > 0) await clear(chat.id, message.message_id, env);
         return { ok: true };
     }
+    if (action === 'start' || action === 'menu') { await send(db, rows[0], { title: 'Alza', body: 'Elegí una opción del menú o escribí /ayuda.', replyMarkup: MENU }, env); return { ok: true }; }
+    if (action === 'alza') { await send(db, rows[0], { title: 'Alza', body: 'Abrí la sección que quieras:', replyMarkup: appLinks(env, action, argument) }, env); return { ok: true }; }
+    if (action === 'precio') { await send(db, rows[0], { title: 'Alza', body: 'Consultá la evolución de precios en la página de Alza.', replyMarkup: appLinks(env, action, argument) }, env); return { ok: true }; }
     const reply = await commandReply(db, user._id, command[1].toLowerCase(), command[2] || '', env, { now });
     let chunk = '';
     for (const line of String(reply).split('\n')) {
@@ -86,6 +83,12 @@ export async function telegramWebhook(db, env, header, body, now = Date.now(), {
     }
     if (chunk) await send(db, rows[0], { title: 'Alza', body: chunk, replyMarkup: appLinks(env, action, argument) }, env);
     return { ok: true };
+}
+
+export async function clearTelegramMessages(chatId, messageId, env, fetcher = fetch) {
+    const first = Math.max(1, messageId - 99);
+    const messageIds = Array.from({ length: messageId - first + 1 }, (_, index) => first + index);
+    await telegramCall(env, 'deleteMessages', { chat_id: chatId, message_ids: messageIds }, fetcher);
 }
 
 export async function telegramDisconnect(db, user) {
@@ -98,15 +101,6 @@ export async function sendTelegram(db, row, payload, env, fetcher = fetch) {
     if (!row.chatId || !/^\d+$/.test(row.chatId)) throw new HttpError(400, 'Destino de Telegram inválido.');
     await telegramCall(env, 'sendMessage', { chat_id: row.chatId, text: `${payload.title}\n${payload.body}`, link_preview_options: { is_disabled: true }, ...(payload.replyMarkup ? { reply_markup: payload.replyMarkup } : {}) }, fetcher);
     return true;
-}
-
-export async function sendTelegramPhoto(row, png, caption, env, fetcher = fetch) {
-    if (!row.chatId || !/^\d+$/.test(row.chatId) || !Buffer.isBuffer(png)) throw new HttpError(400, 'No se pudo preparar el gráfico.');
-    const { token } = config(env); if (!token) throw new HttpError(503, 'Telegram todavía no está configurado.');
-    const form = new FormData(); form.set('chat_id', row.chatId); form.set('caption', String(caption || '').slice(0, 1024)); form.set('photo', new Blob([png], { type: 'image/png' }), 'grafico.png');
-    let response, data;
-    try { response = await fetcher(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: form, signal: AbortSignal.timeout(15000) }); data = await response.json(); } catch { throw new HttpError(503, 'No se pudo enviar el gráfico a Telegram.'); }
-    if (!response.ok || !data?.ok) throw new HttpError(503, 'Telegram no pudo enviar el gráfico.');
 }
 
 export async function telegramTest(db, user, env, payload = { title: '🧪 Alza · Prueba de notificación', body: 'Tu cuenta de Telegram está conectada.' }) {

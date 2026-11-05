@@ -9,7 +9,7 @@ const names = { crypto: 'Cripto', stock: 'Acciones', cedear: 'CEDEARs', 'arg-sto
 const money = (amount, currency) => Number.isFinite(amount) ? new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount) : 'No disponible';
 const number = value => Number.isFinite(value) ? new Intl.NumberFormat('es-AR', { maximumSignificantDigits: 10 }).format(value) : 'No disponible';
 const today = now => new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
-const HELP = '🛟 Comandos disponibles:\n/menu — botones principales\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/wallets — direcciones y saldos\n/distribucion — cartera por tipo\n/grafico distribucion — gráfico de cartera\n/alza — abrir Alza\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
+const HELP = '🛟 Comandos disponibles:\n/menu — botones principales\n/clear — borrar hasta 100 mensajes recientes (48 horas)\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/wallets — direcciones y saldos\n/distribucion — cartera por tipo\n/alza — abrir Alza\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
 
 async function dollarRates(fetcher) {
     const response = await fetcher('https://dolarapi.com/v1/dolares', { signal: AbortSignal.timeout(12000) });
