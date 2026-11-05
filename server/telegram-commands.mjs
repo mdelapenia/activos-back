@@ -88,7 +88,7 @@ export async function telegramCommand(db, userId, command, argument, env, { fetc
             if (!list.length) return `${header}\nSin saldos detectados.`;
             return `${header}\n${list.slice(0, 15).map(item => `${item.name}${item.symbol ? ` (${item.symbol})` : ''}: ${number(item.units)}${item.key !== 'native' ? ` · contrato ${item.key}` : ''}`).join('\n')}${list.length > 15 || result.value.truncated ? '\nLa lista de tokens está incompleta; revisá la wallet.' : ''}`;
         });
-        return `👛 Tus wallets (${saved.length}) · página ${page}/${pages}\n\n${lines.join('\n\n')}${page < pages ? `\n\nMás wallets: /wallets ${page + 1}` : ''}`;
+        return `💳 Tus wallets (${saved.length}) · página ${page}/${pages}\n\n${lines.join('\n\n')}${page < pages ? `\n\nMás wallets: /wallets ${page + 1}` : ''}`;
     }
     if (command === 'dolar') {
         try { const rows = await dollarRates(fetcher); return rows.length ? `💵 Cotizaciones del dólar (ARS)\n${rows.map(r => `${r.nombre || r.casa}: compra ${money(r.compra, 'ARS')} · venta ${money(r.venta, 'ARS')}`).join('\n')}\nFuente: DolarAPI.` : 'No hay cotizaciones disponibles.'; }

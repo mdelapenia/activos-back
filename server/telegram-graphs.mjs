@@ -67,10 +67,20 @@ export async function telegramGraph(db, userId, argument, { fetcher = fetch, now
     const low = Math.min(...points.map(p => p.price)), high = Math.max(...points.map(p => p.price));
     const padding = (high - low || high * 0.02) * 0.1, min = low - padding, max = high + padding;
     const { image, ctx } = canvas(`Evolución · ${asset.name}`, `Últimos 30 días · ${['crypto', 'stock'].includes(asset.kind) ? 'USD' : 'ARS'} por unidad`);
+    const unit = ['crypto', 'stock'].includes(asset.kind) ? 'USD' : 'ARS';
+    ctx.fillStyle = '#f1f4f1'; ctx.font = 'bold 24px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(`Último: ${unit} ${fmt(points.at(-1).price)}`, 1030, 165); ctx.textAlign = 'left';
     const left = 130, right = 1030, top = 230, bottom = 580;
     for (let i = 0; i <= 4; i++) { const y = top + (bottom - top) * i / 4; ctx.strokeStyle = '#33443a'; ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke(); ctx.fillStyle = '#a6b8ae'; ctx.font = '18px sans-serif'; ctx.textAlign = 'right'; ctx.fillText(fmt(max - (max - min) * i / 4), left - 14, y + 6); }
     ctx.strokeStyle = '#83d8ab'; ctx.lineWidth = 4; ctx.beginPath();
     points.forEach((point, i) => { const x = left + (point.time - points[0].time) / (points.at(-1).time - points[0].time || 1) * (right - left); const y = bottom - (point.price - min) / (max - min) * (bottom - top); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.stroke();
-    ctx.textAlign = 'left'; ctx.fillStyle = '#a6b8ae'; ctx.font = '20px sans-serif'; ctx.fillText(new Date(points[0].time).toLocaleDateString('es-AR', { timeZone: 'UTC' }), left, 625); ctx.textAlign = 'right'; ctx.fillText(new Date(points.at(-1).time).toLocaleDateString('es-AR', { timeZone: 'UTC' }), right, 625);
-    return { png: image.toBuffer('image/png'), caption: `${asset.name} · últimos 30 días. Cotizaciones históricas; pueden estar demoradas.` };
+    ctx.fillStyle = '#a6b8ae'; ctx.font = '18px sans-serif';
+    for (let i = 0; i <= 4; i++) {
+        const x = left + (right - left) * i / 4;
+        const timestamp = points[0].time + (points.at(-1).time - points[0].time) * i / 4;
+        ctx.textAlign = i === 0 ? 'left' : i === 4 ? 'right' : 'center';
+        ctx.fillText(new Date(timestamp).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: '2-digit', timeZone: 'UTC' }), x, 620);
+    }
+    const lastDate = new Date(points.at(-1).time).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+    return { png: image.toBuffer('image/png'), caption: `${asset.name} · últimos 30 días. Último dato: ${unit} ${fmt(points.at(-1).price)} (${lastDate}). Las cotizaciones pueden estar demoradas.` };
 }
