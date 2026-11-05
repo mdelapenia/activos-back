@@ -2,13 +2,14 @@ import { readPortfolio } from './portfolio.mjs';
 import { portfolioDividends } from './dividends.mjs';
 import { loadPriceQuotes } from './push.mjs';
 import { stockQuotes } from './stock-quotes.mjs';
+import { walletAddresses, walletHoldings } from './wallets.mjs';
 
 const aliases = { btc: 'bitcoin', eth: 'ethereum', sol: 'solana', usdc: 'usd-coin', usdt: 'tether', bnb: 'binancecoin' };
 const names = { crypto: 'Cripto', stock: 'Acciones', cedear: 'CEDEARs', 'arg-stock': 'Acciones argentinas', bond: 'Bonos', fund: 'Fondos', rate: 'Con tasa' };
 const money = (amount, currency) => Number.isFinite(amount) ? new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount) : 'No disponible';
 const number = value => Number.isFinite(value) ? new Intl.NumberFormat('es-AR', { maximumSignificantDigits: 10 }).format(value) : 'No disponible';
 const today = now => new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
-const HELP = '🛟 Comandos disponibles:\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/distribucion — cartera por tipo\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
+const HELP = '🛟 Comandos disponibles:\n/menu — botones principales\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/precio BTC — consultar cotización\n/wallets — direcciones y saldos\n/distribucion — cartera por tipo\n/grafico distribucion — gráfico de cartera\n/grafico BTC — evolución de un activo\n/alza — abrir Alza\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
 
 async function dollarRates(fetcher) {
     const response = await fetcher('https://dolarapi.com/v1/dolares', { signal: AbortSignal.timeout(12000) });
@@ -35,7 +36,7 @@ function rateValue(item, now) {
     return item.amount * Math.pow(1 + monthly, (now - start) / (365.25 / 12 * 86400000));
 }
 const quoteCurrency = item => ['cedear', 'arg-stock', 'bond', 'fund'].includes(item.kind) ? 'ARS' : 'USD';
-function convert(value, from, to, fx) { return !Number.isFinite(value) ? NaN : from === to ? value : !fx ? NaN : from === 'USD' ? value * fx.value : value / fx.value; }
+export function convert(value, from, to, fx) { return !Number.isFinite(value) ? NaN : from === to ? value : !fx ? NaN : from === 'USD' ? value * fx.value : value / fx.value; }
 function position(item, quotes, fx, now) {
     const currency = quoteCurrency(item), quote = quotes[`${item.kind}:${item.coin}`];
     const current = item.kind === 'rate' ? rateValue(item, now) : Number.isFinite(quote) && Number.isFinite(item.units) ? item.units * quote : NaN;
@@ -44,7 +45,7 @@ function position(item, quotes, fx, now) {
     const result = Number.isFinite(value) && Number.isFinite(cost) ? value - cost : NaN;
     return { ...item, quote, quoteCurrency: currency, value, result, percent: cost > 0 && Number.isFinite(result) ? result / cost * 100 : NaN };
 }
-async function priced(items, fetcher, now, dependencies) {
+export async function priced(items, fetcher, now, dependencies) {
     const wanted = items.filter(i => i.kind !== 'rate' && i.coin).map(i => ({ assetKind: i.kind, assetId: i.coin }));
     const stocks = [...new Set(items.filter(i => i.kind === 'stock' && i.coin).map(i => i.coin.toUpperCase()))];
     const [quotesResult, stockResult, fxResult] = await Promise.allSettled([dependencies.quotes(wanted, fetcher), dependencies.stocks(stocks, fetcher), dependencies.fx(fetcher)]);
@@ -58,21 +59,56 @@ function detail(row) {
     const unitCost = row.costUnknown || !(row.units > 0) ? NaN : row.amount / row.units;
     return `${row.name}${row.coin ? ` (${row.coin})` : ''} · ${names[row.kind] || row.kind}\nCantidad: ${row.units == null ? 'No aplica' : number(row.units)}\nPrecio actual: ${row.kind === 'rate' ? 'No aplica' : money(row.quote, row.quoteCurrency)}\nPrecio de compra: ${money(unitCost, row.currency)}\nValor actual: ${money(row.value, row.currency)}\nResultado: ${result}`;
 }
-function findAssets(items, query) {
+export function findAssets(items, query) {
     const q = query.trim().replace(/^['"]|['"]$/g, '').replace(/^\$+/, '').toLowerCase(); if (!q) return [];
     const alias = aliases[q] || q;
     const exact = items.filter(i => (i.coin || '').toLowerCase() === alias || i.name.toLowerCase() === q);
     return exact.length ? exact : items.filter(i => i.name.toLowerCase().includes(q) || (i.coin || '').toLowerCase().includes(q));
 }
 
-export async function telegramCommand(db, userId, command, argument, env, { fetcher = fetch, now = Date.now(), quotes = loadPriceQuotes, stocks = stockQuotes, fx = fxRate, dividends = portfolioDividends } = {}) {
+export async function graphPositions(items, fetcher = fetch, now = Date.now()) {
+    return priced(items, fetcher, now, { quotes: loadPriceQuotes, stocks: stockQuotes, fx: fxRate });
+}
+
+export async function telegramCommand(db, userId, command, argument, env, { fetcher = fetch, now = Date.now(), quotes = loadPriceQuotes, stocks = stockQuotes, fx = fxRate, dividends = portfolioDividends, wallets = walletAddresses, holdings = walletHoldings } = {}) {
     if (command === 'ayuda') return HELP;
+    if (command === 'wallets') {
+        const { wallets: saved } = await wallets(db, { _id: userId }, 'GET', null);
+        if (!saved.length) return 'No tenés wallets guardadas. Agregá una en Configuración → Cuenta.';
+        if (argument.trim() && !/^[1-9]\d{0,4}$/.test(argument.trim())) return 'Usá /wallets o indicá una página, por ejemplo /wallets 2.';
+        const page = Number(argument.trim() || '1'), pages = Math.ceil(saved.length / 5);
+        if (page > pages) return `Esa página no existe. Hay ${pages} ${pages === 1 ? 'página' : 'páginas'}.`;
+        const selected = saved.slice((page - 1) * 5, page * 5);
+        const results = await Promise.allSettled(selected.map(wallet => holdings(db, { _id: userId }, wallet.id, fetcher)));
+        const lines = selected.map((wallet, index) => {
+            const result = results[index];
+            const header = `${wallet.label || 'Wallet'} · ${wallet.network}\n${wallet.address}`;
+            if (result.status !== 'fulfilled') return `${header}\nNo se pudo consultar el saldo de esta red.`;
+            const list = result.value.holdings;
+            if (!list.length) return `${header}\nSin saldos detectados.`;
+            return `${header}\n${list.slice(0, 15).map(item => `${item.name}${item.symbol ? ` (${item.symbol})` : ''}: ${number(item.units)}${item.key !== 'native' ? ` · contrato ${item.key}` : ''}`).join('\n')}${list.length > 15 || result.value.truncated ? '\nLa lista de tokens está incompleta; revisá la wallet.' : ''}`;
+        });
+        return `👛 Tus wallets (${saved.length}) · página ${page}/${pages}\n\n${lines.join('\n\n')}${page < pages ? `\n\nMás wallets: /wallets ${page + 1}` : ''}`;
+    }
     if (command === 'dolar') {
         try { const rows = await dollarRates(fetcher); return rows.length ? `💵 Cotizaciones del dólar (ARS)\n${rows.map(r => `${r.nombre || r.casa}: compra ${money(r.compra, 'ARS')} · venta ${money(r.venta, 'ARS')}`).join('\n')}\nFuente: DolarAPI.` : 'No hay cotizaciones disponibles.'; }
         catch { return 'No se pudieron consultar los dólares. Intentá nuevamente.'; }
     }
     const { portfolio } = await readPortfolio(db, userId);
     const items = portfolio.investments || [];
+    if (command === 'precio') {
+        const term = argument.trim().replace(/^\$/, '').toLowerCase();
+        if (!term) return 'Indicá un activo, por ejemplo: /precio BTC';
+        if (!/^[a-z0-9][a-z0-9.~-]{0,149}$/.test(term)) return 'Ingresá un ticker o identificador válido, por ejemplo /precio BTC.';
+        const matches = findAssets(items, term).filter(item => item.kind !== 'rate' && ((item.coin || '').toLowerCase() === (aliases[term] || term) || item.name.toLowerCase() === term));
+        const choices = matches.length ? matches.map(item => ({ kind: item.kind, coin: item.coin, name: item.name })) : aliases[term] ? [{ kind: 'crypto', coin: aliases[term], name: aliases[term] }] : [{ kind: 'crypto', coin: term, name: term }, ...(/^[a-z0-9][a-z0-9.-]{0,14}$/.test(term) ? [{ kind: 'stock', coin: term.toUpperCase(), name: term.toUpperCase() }] : [])];
+        const unique = [...new Map(choices.map(item => [`${item.kind}:${item.coin}`, item])).values()];
+        const [prices, stockPrices] = await Promise.allSettled([quotes(unique.map(item => ({ assetKind: item.kind, assetId: item.coin })), fetcher), stocks(unique.filter(item => item.kind === 'stock').map(item => item.coin.toUpperCase()), fetcher)]);
+        const values = prices.status === 'fulfilled' ? prices.value : {};
+        if (stockPrices.status === 'fulfilled') for (const [id, value] of Object.entries(stockPrices.value)) values[`stock:${id}`] = value;
+        const lines = unique.flatMap(item => { const price = values[`${item.kind}:${item.coin}`]; return Number.isFinite(price) && price > 0 ? [`${item.name} · ${names[item.kind] || item.kind}: ${money(price, quoteCurrency(item))}`] : []; });
+        return lines.length ? `💱 Cotización\n${lines.join('\n')}\nLos precios pueden estar demorados.` : 'No encontré una cotización disponible. Probá con el ID de CoinGecko o un ticker de tu cartera.';
+    }
     if (command === 'alertas') {
         const alerts = portfolio.alerts || [];
         if (!alerts.length) return 'No tenés alertas configuradas.';

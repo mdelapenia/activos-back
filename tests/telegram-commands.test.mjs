@@ -32,6 +32,20 @@ test('distribución, dólares y ayuda muestran la información solicitada', asyn
     assert.match(await telegramCommand(db, 'alice', 'dolar', '', env, { ...deps, fetcher }), /MEP.*1\.000/);
     assert.match(await telegramCommand(db, 'alice', 'ayuda', '', env, deps), /\/activo SOL/);
 });
+test('precio BTC consulta la cotización aun sin tenencia y maneja precios faltantes', async () => {
+    const empty = { collection: () => ({ findOne: async () => ({ portfolio: { investments: [], preferences: {} } }) }) };
+    const price = await telegramCommand(empty, 'alice', 'precio', 'BTC', env, deps);
+    assert.match(price, /bitcoin/i); assert.match(price, /300/);
+    const missing = await telegramCommand(empty, 'alice', 'precio', 'BTC', env, { ...deps, quotes: async () => ({}) });
+    assert.match(missing, /No encontré/);
+    assert.match(await telegramCommand(empty, 'alice', 'precio', '', env, deps), /BTC/);
+});
+test('wallets consulta solo las direcciones del usuario y muestra fallos por red', async () => {
+    const seen = [];
+    const opts = { ...deps, wallets: async (_db, user) => { assert.equal(user._id, 'alice'); return { wallets: [{ id: 'one', label: 'Principal', network: 'solana', address: 'Abc123' }, { id: 'two', label: '', network: 'base', address: '0x123' }] }; }, holdings: async (_db, user, id) => { assert.equal(user._id, 'alice'); seen.push(id); if (id === 'two') throw new Error('no disponible'); return { holdings: [{ key: 'native', name: 'Solana', symbol: 'SOL', units: 2 }] }; } };
+    const result = await telegramCommand(db, 'alice', 'wallets', '', env, opts);
+    assert.deepEqual(seen, ['one', 'two']); assert.match(result, /Principal/); assert.match(result, /SOL.*2/); assert.match(result, /No se pudo consultar/);
+});
 test('webhook solo consulta la cuenta del chat privado y rechaza chats ambiguos', async () => {
     let subscriptions = [{ userId: 'alice', chatId: '123' }]; const calls = [], messages = [];
     const database = { collection: name => name === 'telegram_subscriptions' ? { find: filter => { assert.equal(filter.chatId, '123'); return { limit: () => ({ toArray: async () => subscriptions }) }; } } : { findOne: async filter => ({ _id: filter._id }) } };

@@ -19,7 +19,7 @@ test('vincula un chat privado con código de un solo uso y permite desconectarlo
     await assert.rejects(telegramWebhook(db, env, 'incorrecto', update, 2000), { status: 403 });
     await telegramWebhook(db, env, env.TELEGRAM_WEBHOOK_SECRET, { message: { ...update.message, chat: { id: 123, type: 'group' } } }, 2000);
     assert.equal(subscription, undefined);
-    await telegramWebhook(db, env, env.TELEGRAM_WEBHOOK_SECRET, update, 2000);
+    await telegramWebhook(db, env, env.TELEGRAM_WEBHOOK_SECRET, update, 2000, { send: async () => {} });
     assert.equal(subscription.chatId, '123'); assert.equal(subscription.userId, 'alice');
     await telegramWebhook(db, env, env.TELEGRAM_WEBHOOK_SECRET, { message: { ...update.message, chat: { id: 999, type: 'private' }, from: { id: 999 } } }, 2000);
     assert.equal(subscription.chatId, '123');
