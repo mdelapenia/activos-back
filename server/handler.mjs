@@ -112,8 +112,8 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 return reply(200, { ok: true });
             }
             const user = await requireUser(db, req, now);
-            if (path === '/api/push/config') return reply(200, { publicKey: pushConfig(env).publicKey });
-            if (path === '/api/push/subscribe') { pushConfig(env); await saveSubscription(db, user, await jsonBody(req)); return reply(200, { ok: true }); }
+            if (path === '/api/push/config') return reply(200, { publicKey: (await pushConfig(db, env)).publicKey });
+            if (path === '/api/push/subscribe') { await pushConfig(db, env); await saveSubscription(db, user, await jsonBody(req)); return reply(200, { ok: true }); }
             if (path === '/api/push/unsubscribe') { await removeSubscription(db, user, (await jsonBody(req)).endpoint); return reply(200, { ok: true }); }
             if (path === '/api/push/status') return reply(200, { enabled: await subscriptionStatus(db, user, (await jsonBody(req)).endpoint) });
             if (path === '/api/push/test') { const body = await jsonBody(req); await testPush(db, user, body.endpoint, env, body.alertId); return reply(200, { ok: true }); }

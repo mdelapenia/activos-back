@@ -5,9 +5,25 @@ import { readPortfolio } from './portfolio.mjs';
 import { portfolioDividends } from './dividends.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
-export function pushConfig(env) {
-    if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY || !env.VAPID_SUBJECT) throw new HttpError(503, 'Las notificaciones push todavía no están configuradas en el servidor.');
-    return { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject: env.VAPID_SUBJECT };
+export async function pushConfig(db, env) {
+    const subject = env.VAPID_SUBJECT || (env.APP_ORIGIN?.startsWith('https://') ? env.APP_ORIGIN : 'https://activos-nu.vercel.app');
+    if (env.VAPID_PUBLIC_KEY || env.VAPID_PRIVATE_KEY) {
+        if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) throw new HttpError(503, 'La configuración push está incompleta en el servidor.');
+        return { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject };
+    }
+    const collection = db.collection('push_config');
+    let row = await collection.findOne({ _id: 'vapid' });
+    if (!row) {
+        const keys = webpush.generateVAPIDKeys();
+        try {
+            await collection.updateOne({ _id: 'vapid' }, { $setOnInsert: { publicKey: keys.publicKey, privateKey: keys.privateKey, createdAt: new Date() } }, { upsert: true });
+        } catch (error) {
+            if (error.code !== 11000) throw error;
+        }
+        row = await collection.findOne({ _id: 'vapid' });
+    }
+    if (!row || typeof row.publicKey !== 'string' || typeof row.privateKey !== 'string' || !row.publicKey || !row.privateKey) throw new HttpError(503, 'No se pudo cargar la configuración push.');
+    return { publicKey: row.publicKey, privateKey: row.privateKey, subject };
 }
 function validSubscription(subscription) {
     try {
@@ -35,7 +51,7 @@ export function isQuietHours(settings, now = Date.now()) {
     return settings.start < settings.end ? time >= settings.start && time < settings.end : time >= settings.start || time < settings.end;
 }
 export async function sendPush(db, row, payload, env) {
-    const config = pushConfig(env);
+    const config = await pushConfig(db, env);
     try { await webpush.sendNotification(row.subscription, JSON.stringify(payload), { vapidDetails: config, TTL: 86400 }); return true; }
     catch (error) { if (error.statusCode === 404 || error.statusCode === 410) { await db.collection('push_subscriptions').deleteOne({ _id: row._id }); return false; } throw error; }
 }
@@ -56,7 +72,6 @@ export async function testPush(db, user, endpoint, env, alertId, deliver = sendP
     if (!await deliver(db, row, payload, env)) throw new HttpError(410, 'La suscripción venció. Activá las notificaciones otra vez.');
 }
 export async function checkDividendPush(db, env, now = Date.now(), { loadDividends = portfolioDividends, deliver = sendPush } = {}) {
-    pushConfig(env);
     if (!env.MASSIVE_API_KEY) return;
     const subscriptions = await db.collection('push_subscriptions').find({}).toArray();
     const users = new Map();

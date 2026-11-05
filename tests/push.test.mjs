@@ -1,8 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkDividendPush, saveSubscription, testPush, isQuietHours, removeSubscription } from '../server/push.mjs';
+import { checkDividendPush, saveSubscription, testPush, isQuietHours, removeSubscription, pushConfig } from '../server/push.mjs';
 
 const env = { VAPID_PUBLIC_KEY: 'public', VAPID_PRIVATE_KEY: 'private', VAPID_SUBJECT: 'https://example.com', MASSIVE_API_KEY: 'test' };
+test('genera y reutiliza un único par VAPID en la base ante inicios simultáneos', async () => {
+    let stored;
+    const db = { collection: name => {
+        assert.equal(name, 'push_config');
+        return {
+            findOne: async () => stored,
+            updateOne: async (_filter, update) => { stored ??= { _id: 'vapid', ...update.$setOnInsert }; },
+        };
+    } };
+    const configs = await Promise.all(Array.from({ length: 8 }, () => pushConfig(db, {})));
+    assert.ok(configs.every(config => config.publicKey === configs[0].publicKey && config.privateKey === configs[0].privateKey));
+    assert.equal((await pushConfig(db, {})).publicKey, configs[0].publicKey);
+    assert.equal(configs[0].subject, 'https://activos-nu.vercel.app');
+});
+test('conserva las claves VAPID explícitas y rechaza una configuración parcial', async () => {
+    assert.deepEqual(await pushConfig({}, env), { publicKey: 'public', privateKey: 'private', subject: 'https://example.com' });
+    await assert.rejects(() => pushConfig({}, { VAPID_PUBLIC_KEY: 'public' }), { status: 503 });
+});
 test('respeta no molestar en hora argentina, incluso al cruzar medianoche', () => {
     const quiet = { enabled: true, start: '22:00', end: '08:00' };
     assert.equal(isQuietHours(quiet, Date.parse('2026-11-05T02:00:00Z')), true);

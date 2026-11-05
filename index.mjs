@@ -15,7 +15,7 @@ if (process.env.NODE_ENV === 'production' && !process.env.APP_ORIGIN) {
 const server = createApiServer(handler);
 let checkingPush = false;
 async function checkPush() {
-    if (checkingPush || !process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_SUBJECT) return;
+    if (checkingPush || !process.env.MASSIVE_API_KEY) return;
     checkingPush = true;
     try { await checkDividendPush(await getDatabase(), process.env); }
     catch (error) { console.error('No se pudieron revisar las notificaciones:', error.message); }
