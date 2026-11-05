@@ -14,13 +14,6 @@ test('genera un PNG de distribución e indica si faltan cotizaciones', async () 
     const missing = await telegramGraph(db, 'alice', 'distribucion', { positions: async () => ({ rows: [{ kind: 'crypto', currency: 'USD', value: NaN }], fx: null }) });
     assert.match(missing.error, /faltan cotizaciones/);
 });
-test('genera un PNG histórico con precios reales y rechaza un historial insuficiente', async () => {
-    const now = Date.parse('2026-11-05T15:00:00Z');
-    const fetcher = async () => ({ ok: true, json: async () => ({ prices: [[now - 86400000, 100], [now - 1000, 110]] }) });
-    const result = await telegramGraph(db, 'alice', 'SOL', { now, fetcher }); png(result.png); assert.match(result.caption, /Solana/);
-    const missing = await telegramGraph(db, 'alice', 'SOL', { now, fetcher: async () => ({ ok: true, json: async () => ({ prices: [] }) }) });
-    assert.match(missing.error, /suficientes datos/);
-});
 test('los botones del menú solo ejecutan consultas del chat autenticado', async () => {
     const responses = [], calls = [];
     const database = { collection: name => name === 'telegram_subscriptions' ? { find: () => ({ limit: () => ({ toArray: async () => [{ userId: 'alice', chatId: '123' }] }) }) } : { findOne: async () => ({ _id: 'alice' }) } };

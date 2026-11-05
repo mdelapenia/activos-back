@@ -32,14 +32,6 @@ test('distribución, dólares y ayuda muestran la información solicitada', asyn
     assert.match(await telegramCommand(db, 'alice', 'dolar', '', env, { ...deps, fetcher }), /MEP.*1\.000/);
     assert.match(await telegramCommand(db, 'alice', 'ayuda', '', env, deps), /\/activo SOL/);
 });
-test('precio BTC consulta la cotización aun sin tenencia y maneja precios faltantes', async () => {
-    const empty = { collection: () => ({ findOne: async () => ({ portfolio: { investments: [], preferences: {} } }) }) };
-    const price = await telegramCommand(empty, 'alice', 'precio', 'BTC', env, deps);
-    assert.match(price, /bitcoin/i); assert.match(price, /300/);
-    const missing = await telegramCommand(empty, 'alice', 'precio', 'BTC', env, { ...deps, quotes: async () => ({}) });
-    assert.match(missing, /No encontré/);
-    assert.match(await telegramCommand(empty, 'alice', 'precio', '', env, deps), /BTC/);
-});
 test('wallets consulta solo las direcciones del usuario y muestra fallos por red', async () => {
     const seen = [];
     const opts = { ...deps, wallets: async (_db, user) => { assert.equal(user._id, 'alice'); return { wallets: [{ id: 'one', label: 'Principal', network: 'solana', address: 'Abc123' }, { id: 'two', label: '', network: 'base', address: '0x123' }] }; }, holdings: async (_db, user, id) => { assert.equal(user._id, 'alice'); seen.push(id); if (id === 'two') throw new Error('no disponible'); return { holdings: [{ key: 'native', name: 'Solana', symbol: 'SOL', units: 2 }] }; } };

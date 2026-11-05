@@ -9,7 +9,7 @@ const names = { crypto: 'Cripto', stock: 'Acciones', cedear: 'CEDEARs', 'arg-sto
 const money = (amount, currency) => Number.isFinite(amount) ? new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount) : 'No disponible';
 const number = value => Number.isFinite(value) ? new Intl.NumberFormat('es-AR', { maximumSignificantDigits: 10 }).format(value) : 'No disponible';
 const today = now => new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
-const HELP = '🛟 Comandos disponibles:\n/menu — botones principales\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/precio BTC — consultar cotización\n/wallets — direcciones y saldos\n/distribucion — cartera por tipo\n/grafico distribucion — gráfico de cartera\n/grafico BTC — evolución de un activo\n/alza — abrir Alza\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
+const HELP = '🛟 Comandos disponibles:\n/menu — botones principales\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/wallets — direcciones y saldos\n/distribucion — cartera por tipo\n/grafico distribucion — gráfico de cartera\n/alza — abrir Alza\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
 
 async function dollarRates(fetcher) {
     const response = await fetcher('https://dolarapi.com/v1/dolares', { signal: AbortSignal.timeout(12000) });
@@ -96,19 +96,6 @@ export async function telegramCommand(db, userId, command, argument, env, { fetc
     }
     const { portfolio } = await readPortfolio(db, userId);
     const items = portfolio.investments || [];
-    if (command === 'precio') {
-        const term = argument.trim().replace(/^\$/, '').toLowerCase();
-        if (!term) return 'Indicá un activo, por ejemplo: /precio BTC';
-        if (!/^[a-z0-9][a-z0-9.~-]{0,149}$/.test(term)) return 'Ingresá un ticker o identificador válido, por ejemplo /precio BTC.';
-        const matches = findAssets(items, term).filter(item => item.kind !== 'rate' && ((item.coin || '').toLowerCase() === (aliases[term] || term) || item.name.toLowerCase() === term));
-        const choices = matches.length ? matches.map(item => ({ kind: item.kind, coin: item.coin, name: item.name })) : aliases[term] ? [{ kind: 'crypto', coin: aliases[term], name: aliases[term] }] : [{ kind: 'crypto', coin: term, name: term }, ...(/^[a-z0-9][a-z0-9.-]{0,14}$/.test(term) ? [{ kind: 'stock', coin: term.toUpperCase(), name: term.toUpperCase() }] : [])];
-        const unique = [...new Map(choices.map(item => [`${item.kind}:${item.coin}`, item])).values()];
-        const [prices, stockPrices] = await Promise.allSettled([quotes(unique.map(item => ({ assetKind: item.kind, assetId: item.coin })), fetcher), stocks(unique.filter(item => item.kind === 'stock').map(item => item.coin.toUpperCase()), fetcher)]);
-        const values = prices.status === 'fulfilled' ? prices.value : {};
-        if (stockPrices.status === 'fulfilled') for (const [id, value] of Object.entries(stockPrices.value)) values[`stock:${id}`] = value;
-        const lines = unique.flatMap(item => { const price = values[`${item.kind}:${item.coin}`]; return Number.isFinite(price) && price > 0 ? [`${item.name} · ${names[item.kind] || item.kind}: ${money(price, quoteCurrency(item))}`] : []; });
-        return lines.length ? `💱 Cotización\n${lines.join('\n')}\nLos precios pueden estar demorados.` : 'No encontré una cotización disponible. Probá con el ID de CoinGecko o un ticker de tu cartera.';
-    }
     if (command === 'alertas') {
         const alerts = portfolio.alerts || [];
         if (!alerts.length) return 'No tenés alertas configuradas.';

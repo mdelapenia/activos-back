@@ -3,8 +3,8 @@ import { digest, HttpError, newToken } from './security.mjs';
 import { telegramCommand } from './telegram-commands.mjs';
 import { telegramGraph } from './telegram-graphs.mjs';
 
-const MENU = { keyboard: [[{ text: '💼 Mi cartera' }, { text: '💱 Precios' }], [{ text: '💳 Wallets' }, { text: '🔔 Alertas' }], [{ text: '📊 Gráfico de distribución' }, { text: '📈 Gráfico de activo' }], [{ text: '🌐 Abrir Alza' }, { text: '🛟 Ayuda' }]], resize_keyboard: true, is_persistent: true };
-const menuCommands = { '💼 Mi cartera': '/cartera', '💱 Precios': '/precio', '💳 Wallets': '/wallets', '🔔 Alertas': '/alertas', '📊 Gráfico de distribución': '/grafico distribucion', '📈 Gráfico de activo': '/grafico', '🌐 Abrir Alza': '/alza', '🛟 Ayuda': '/ayuda' };
+const MENU = { keyboard: [[{ text: '💼 Mi cartera' }], [{ text: '💳 Wallets' }, { text: '🔔 Alertas' }], [{ text: '📊 Gráfico de distribución' }], [{ text: '🌐 Abrir Alza' }, { text: '🛟 Ayuda' }]], resize_keyboard: true, is_persistent: true };
+const menuCommands = { '💼 Mi cartera': '/cartera', '💳 Wallets': '/wallets', '🔔 Alertas': '/alertas', '📊 Gráfico de distribución': '/grafico distribucion', '🌐 Abrir Alza': '/alza', '🛟 Ayuda': '/ayuda' };
 function appLinks(env, command, argument) {
     let origin; try { const url = new URL(env.APP_ORIGIN || 'https://activos-nu.vercel.app'); if (url.protocol === 'https:') origin = url.origin; } catch { /* No safe application URL. */ }
     if (!origin) return undefined;
@@ -71,6 +71,7 @@ export async function telegramWebhook(db, env, header, body, now = Date.now(), {
     const action = command[1].toLowerCase(), argument = command[2] || '';
     if (action === 'start' || action === 'menu') { await send(db, rows[0], { title: 'Alza', body: 'Elegí una opción del menú o escribí /ayuda.', replyMarkup: MENU }, env); return { ok: true }; }
     if (action === 'alza') { await send(db, rows[0], { title: 'Alza', body: 'Abrí la sección que quieras:', replyMarkup: appLinks(env, action, argument) }, env); return { ok: true }; }
+    if (action === 'precio' || (action === 'grafico' && !/^distribuci[oó]n$/i.test(argument.trim()))) { await send(db, rows[0], { title: 'Alza', body: 'Consultá la evolución de precios en la página de Alza.', replyMarkup: appLinks(env, action, argument) }, env); return { ok: true }; }
     if (action === 'grafico') {
         const result = await graph(db, user._id, argument, { now });
         if (result.error) await send(db, rows[0], { title: 'Alza', body: result.error }, env);
