@@ -10,8 +10,9 @@ import { portfolioDividends, marketDividends } from './dividends.mjs';
 import { earningsCalendar } from './market-calendar.mjs';
 import { keySettings, marketChat } from './market-ai.mjs';
 import { stockQuotes, stockHistory } from './stock-quotes.mjs';
-import { pushConfig, saveSubscription, removeSubscription, subscriptionStatus, testPush } from './push.mjs';
+import { pushConfig, saveSubscription, removeSubscription, subscriptionStatus, testPush, alertTestPayload } from './push.mjs';
 import { walletAddresses, walletHoldings } from './wallets.mjs';
+import { telegramConnect, telegramDisconnect, telegramStatus, telegramTest, telegramWebhook } from './telegram.mjs';
 
 const COOKIE = 'activos_session';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
@@ -70,17 +71,19 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
             const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
-            if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings') throw new HttpError(404, 'No se encontró esta operación.');
-            const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : allowed;
+            const telegramMethods = { '/api/telegram': ['GET', 'DELETE'], '/api/telegram/connect': ['POST'], '/api/telegram/test': ['POST'], '/api/telegram/webhook': ['POST'] };
+            if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && !Object.hasOwn(telegramMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
+            const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : telegramMethods[path] || allowed;
             if (!methods.includes(method)) { res.setHeader('Allow', methods.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
-            if (method !== 'GET') {
+            if (method !== 'GET' && path !== '/api/telegram/webhook') {
                 const origin = env.APP_ORIGIN || (!production ? 'http://localhost:5173' : '');
                 if (!origin) throw new HttpError(503, 'El acceso todavía no está habilitado.', 'NOT_CONFIGURED');
                 if (req.headers.origin !== new URL(origin).origin || req.headers['x-activos-request'] !== '1') throw new HttpError(403, 'Origen de solicitud no permitido.');
             }
             const db = await database();
             const now = clock();
+            if (path === '/api/telegram/webhook') return reply(200, await telegramWebhook(db, env, req.headers['x-telegram-bot-api-secret-token'], await jsonBody(req), now));
             if (path === '/api/imports/gmail/callback') {
                 await gmailCallback(db, env, new URL(req.url, 'http://localhost').searchParams, now);
                 res.statusCode = 303; res.setHeader('Location', new URL('/importaciones', env.APP_ORIGIN).toString()); return res.end();
@@ -114,6 +117,9 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 return reply(200, { ok: true });
             }
             const user = await requireUser(db, req, now);
+            if (path === '/api/telegram') return reply(200, method === 'GET' ? await telegramStatus(db, user, env) : await telegramDisconnect(db, user));
+            if (path === '/api/telegram/connect') return reply(200, await telegramConnect(db, user, env, now));
+            if (path === '/api/telegram/test') { const body = await jsonBody(req); if (!await db.collection('telegram_subscriptions').findOne({ _id: user._id })) throw new HttpError(404, 'Conectá Telegram primero.'); const payload = body?.alertId === undefined ? undefined : await alertTestPayload(db, user, env, body.alertId); return reply(200, await telegramTest(db, user, env, payload)); }
             if (path === '/api/wallets') return reply(200, await walletAddresses(db, user, method, method === 'GET' ? null : await jsonBody(req)));
             if (path === '/api/wallets/holdings') return reply(200, await walletHoldings(db, user, new URL(req.url, 'http://localhost').searchParams.get('id')));
             if (path === '/api/push/config') return reply(200, { publicKey: (await pushConfig(db, env)).publicKey });

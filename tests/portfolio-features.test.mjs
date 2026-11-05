@@ -11,6 +11,14 @@ test('preserva posiciones cripto importadas con costo desconocido', () => {
     assert.throws(() => validatePortfolio({ ...portfolio, investments: [{ ...investment, amount: 10 }] }));
 });
 
+test('conserva el canal de cada alerta y rechaza opciones inválidas', () => {
+    const portfolio = emptyPortfolio();
+    const alert = { id: 'test', kind: 'price', assetKind: 'crypto', assetId: 'solana', assetName: 'Solana', threshold: 100, direction: 'above', date: '', channels: 'telegram' };
+    portfolio.alerts = [alert];
+    assert.equal(validatePortfolio(portfolio).alerts[0].channels, 'telegram');
+    assert.throws(() => validatePortfolio({ ...portfolio, alerts: [{ ...alert, channels: 'correo' }] }));
+});
+
 test('conserva ventas y preferencias del panel, y rechaza valores inválidos', () => {
     const portfolio = emptyPortfolio();
     portfolio.preferences.panels = ['inflation', 'investments'];

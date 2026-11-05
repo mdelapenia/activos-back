@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 
-const METHODS = 'GET, POST, PUT, OPTIONS';
+const METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
 const HEADERS = ['content-type', 'x-activos-request'];
 
 export function createApiServer(handler, env = process.env) {

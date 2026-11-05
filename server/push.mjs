@@ -1,4 +1,16 @@
 import webpush from 'web-push';
+import { sendTelegram } from './telegram.mjs';
+
+async function notificationSubscriptions(db, env) {
+    const rows = await db.collection('push_subscriptions').find({}).toArray();
+    if (!env.TELEGRAM_BOT_TOKEN) return rows;
+    const telegram = await db.collection('telegram_subscriptions').find({}).toArray();
+    return [...rows, ...telegram.map(row => ({ ...row, _id: `telegram:${row.userId}:${row.chatId}`, channel: 'telegram' }))];
+}
+async function deliverNotification(db, row, payload, env) {
+    return row.channel === 'telegram' ? sendTelegram(db, row, payload, env) : sendPush(db, row, payload, env);
+}
+const receives = (alert, row) => !alert.channels || alert.channels === 'both' || alert.channels === (row.channel === 'telegram' ? 'telegram' : 'push');
 
 import { createHash } from 'node:crypto';
 
@@ -157,10 +169,7 @@ function dividendPushPayload(alert, event, now = Date.now(), test = false) {
     };
 }
 
-export async function testPush(db, user, endpoint, env, alertId, deliver = sendPush, loadDividends = portfolioDividends) {
-    const row = typeof endpoint === 'string' && await db.collection('push_subscriptions').findOne({ _id: digest(endpoint), userId: user._id });
-    if (!row) throw new HttpError(404, 'Activá las notificaciones en este dispositivo primero.');
-
+export async function alertTestPayload(db, user, env, alertId, loadDividends = portfolioDividends, loadQuotes = loadPriceQuotes) {
     let payload = { title: '🧪 Notificación de prueba', body: 'Las notificaciones están funcionando correctamente. ✅', url: '/precios' };
 
     if (alertId !== undefined) {
@@ -170,7 +179,7 @@ export async function testPush(db, user, endpoint, env, alertId, deliver = sendP
 
         if (alert.kind === 'price') {
             // La prueba usa el precio del proveedor, como el envío real.
-            const quotes = await loadPriceQuotes([alert]);
+            const quotes = await loadQuotes([alert]);
             const price = quotes[`${alert.assetKind}:${alert.assetId}`];
             if (!Number.isFinite(price) || price <= 0) throw new HttpError(503, 'No se pudo consultar el precio actual para la prueba.');
             payload = pricePushPayload(alert, price, true);
@@ -200,14 +209,21 @@ export async function testPush(db, user, endpoint, env, alertId, deliver = sendP
         }
     }
 
+    return payload;
+}
+
+export async function testPush(db, user, endpoint, env, alertId, deliver = sendPush, loadDividends = portfolioDividends) {
+    const row = typeof endpoint === 'string' && await db.collection('push_subscriptions').findOne({ _id: digest(endpoint), userId: user._id });
+    if (!row) throw new HttpError(404, 'Activá las notificaciones en este dispositivo primero.');
+    const payload = await alertTestPayload(db, user, env, alertId, loadDividends);
     if (!await deliver(db, row, payload, env)) throw new HttpError(410, 'La suscripción venció. Activá las notificaciones otra vez.');
 }
 
-export async function checkDividendPush(db, env, now = Date.now(), { loadDividends = portfolioDividends, deliver = sendPush } = {}) {
+export async function checkDividendPush(db, env, now = Date.now(), { loadDividends = portfolioDividends, deliver = deliverNotification } = {}) {
 
     if (!env.MASSIVE_API_KEY) return;
 
-    const subscriptions = await db.collection('push_subscriptions').find({}).toArray();
+    const subscriptions = await notificationSubscriptions(db, env);
 
     const users = new Map();
 
@@ -233,7 +249,9 @@ export async function checkDividendPush(db, env, now = Date.now(), { loadDividen
 
             if (!result.configured) continue;
 
-            for (const alert of alerts) {
+            for (const alert of alerts) for (const row of rows) {
+
+                if (!receives(alert, row)) continue;
 
                 const positions = result.items.filter(item => item.kind === alert.assetKind && item.ticker.toUpperCase() === alert.assetId.toUpperCase());
 
@@ -245,7 +263,7 @@ export async function checkDividendPush(db, env, now = Date.now(), { loadDividen
 
                     if (!event.eligible || daysUntil < 0 || daysUntil > alert.threshold) return false;
 
-                    const applicable = alerts.filter(other => other.assetKind === alert.assetKind && other.assetId.toUpperCase() === alert.assetId.toUpperCase() && other.threshold >= daysUntil);
+                    const applicable = alerts.filter(other => receives(other, row) && other.assetKind === alert.assetKind && other.assetId.toUpperCase() === alert.assetId.toUpperCase() && other.threshold >= daysUntil);
 
                     return alert.threshold === Math.min(...applicable.map(other => other.threshold));
 
@@ -267,7 +285,7 @@ export async function checkDividendPush(db, env, now = Date.now(), { loadDividen
 
                 }
 
-                for (const event of grouped.values()) for (const row of rows) {
+                for (const event of grouped.values()) {
 
                     const id = digest(`${row._id}:${alert.id}:${event.payDate} `);
 
@@ -369,9 +387,9 @@ export async function loadPriceQuotes(alerts, fetcher = fetch) {
 
 
 
-export async function checkPricePush(db, env, now = Date.now(), { loadQuotes = loadPriceQuotes, deliver = sendPush } = {}) {
+export async function checkPricePush(db, env, now = Date.now(), { loadQuotes = loadPriceQuotes, deliver = deliverNotification } = {}) {
 
-    const subscriptions = await db.collection('push_subscriptions').find({}).toArray();
+    const subscriptions = await notificationSubscriptions(db, env);
 
     const users = new Map();
 
@@ -405,7 +423,7 @@ export async function checkPricePush(db, env, now = Date.now(), { loadQuotes = l
 
             const id = digest(`price:${row._id}:${alert.id}`);
 
-            if (!matched) { await db.collection('push_deliveries').deleteOne({ _id: id }); continue; }
+            if (!matched || !receives(alert, row)) { await db.collection('push_deliveries').deleteOne({ _id: id }); continue; }
 
             if (isQuietHours(portfolio.preferences?.quietHours, now)) continue;
 

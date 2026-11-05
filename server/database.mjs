@@ -10,6 +10,8 @@ export async function ensureIndexes(db) {
         db.collection('sessions').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('sessions').createIndex({ userId: 1 }),
         db.collection('push_subscriptions').createIndex({ userId: 1 }),
+        db.collection('telegram_link_codes').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+        db.collection('telegram_link_codes').createIndex({ userId: 1 }),
         db.collection('push_deliveries').createIndex({ createdAt: 1 }, { expireAfterSeconds: 400 * 24 * 60 * 60 }),
         db.collection('gmail_oauth_states').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('passkey_challenges').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
