@@ -210,7 +210,23 @@ export async function checkPricePush(db, env, now = Date.now(), { loadQuotes = l
                 await db.collection('push_deliveries').insertOne({ _id: id, createdAt: new Date(now) });
                 const currency = ['cedear', 'arg-stock', 'bond', 'fund'].includes(alert.assetKind) ? 'ARS' : 'USD';
                 const formatted = new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 4 }).format(price);
-                try { await deliver(db, row, { title: `💸 Precio · ${alert.assetName}`, body: `Precio: ${formatted}. Tu alerta de precio se activó.`, url: '/precios' }, env); }
+
+                try {
+                    const isAbove = alert.direction === 'above';
+
+                    const target = new Intl.NumberFormat('es-AR', {
+                        style: 'currency',
+                        currency,
+                        maximumFractionDigits: 4
+                    }).format(alert.threshold);
+
+                    await deliver(db, row, {
+                        title: `${isAbove ? '📈' : '📉'} ${alert.assetName} · Alerta de precio`,
+                        body: `${isAbove ? 'Subió hasta' : 'Bajó hasta'} ${formatted}. 🎯 Tu objetivo era ${target}.`,
+                        url: '/precios'
+                    }, env);
+                }
+
                 catch (error) { await db.collection('push_deliveries').deleteOne({ _id: id }); throw error; }
             } catch (error) { if (error.code !== 11000) console.error('No se pudo enviar una alerta de precio:', error.message); }
         }
