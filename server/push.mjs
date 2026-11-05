@@ -65,7 +65,7 @@ export async function sendPush(db, row, payload, env) {
 export async function testPush(db, user, endpoint, env, alertId, deliver = sendPush, loadDividends = portfolioDividends) {
     const row = typeof endpoint === 'string' && await db.collection('push_subscriptions').findOne({ _id: digest(endpoint), userId: user._id });
     if (!row) throw new HttpError(404, 'Activá las notificaciones en este dispositivo primero.');
-    let payload = { title: '🔔 Alza · notificación de prueba', body: '💰 Así te avisaremos cuando se acerque un dividendo de tu cartera.', url: '/dividendos' };
+    let payload = { title: '🔔 Alza · notificación de prueba', body: 'prueba 🧪', url: '/dividendos' };
     if (alertId !== undefined) {
         const { portfolio } = await readPortfolio(db, user._id);
         const alert = (portfolio.alerts || []).find(item => item.id === alertId && (item.kind === 'dividend' || item.kind === 'price'));
