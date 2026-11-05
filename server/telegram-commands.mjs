@@ -8,7 +8,7 @@ const names = { crypto: 'Cripto', stock: 'Acciones', cedear: 'CEDEARs', 'arg-sto
 const money = (amount, currency) => Number.isFinite(amount) ? new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount) : 'No disponible';
 const number = value => Number.isFinite(value) ? new Intl.NumberFormat('es-AR', { maximumSignificantDigits: 10 }).format(value) : 'No disponible';
 const today = now => new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
-const HELP = 'Comandos disponibles:\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/distribucion — cartera por tipo\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
+const HELP = '🛟 Comandos disponibles:\n/cartera — valor, costo y rendimiento\n/activos — posiciones de tu cartera (usá /activos 2 para más)\n/activo SOL — detalle de un activo\n/distribucion — cartera por tipo\n/dividendos — próximos pagos estimados\n/alertas — alertas y canales\n/dolar — cotizaciones disponibles\n/ayuda — ver esta lista';
 
 async function dollarRates(fetcher) {
     const response = await fetcher('https://dolarapi.com/v1/dolares', { signal: AbortSignal.timeout(12000) });
@@ -56,7 +56,7 @@ async function priced(items, fetcher, now, dependencies) {
 function detail(row) {
     const result = Number.isFinite(row.result) ? `${money(row.result, row.currency)} (${row.percent >= 0 ? '+' : ''}${number(row.percent)}%)` : 'No disponible';
     const unitCost = row.costUnknown || !(row.units > 0) ? NaN : row.amount / row.units;
-    return `${row.name}${row.coin ? ` (${row.coin})` : ''} · ${names[row.kind] || row.kind}\nCantidad: ${row.units == null ? 'No aplica' : number(row.units)}\nPrecio actual: ${row.kind === 'rate' ? 'No aplica' : money(row.quote, row.quoteCurrency)}\nCosto promedio: ${money(unitCost, row.currency)}\nValor actual: ${money(row.value, row.currency)}\nResultado: ${result}`;
+    return `${row.name}${row.coin ? ` (${row.coin})` : ''} · ${names[row.kind] || row.kind}\nCantidad: ${row.units == null ? 'No aplica' : number(row.units)}\nPrecio actual: ${row.kind === 'rate' ? 'No aplica' : money(row.quote, row.quoteCurrency)}\nPrecio de compra: ${money(unitCost, row.currency)}\nValor actual: ${money(row.value, row.currency)}\nResultado: ${result}`;
 }
 function findAssets(items, query) {
     const q = query.trim().replace(/^['"]|['"]$/g, '').replace(/^\$+/, '').toLowerCase(); if (!q) return [];
@@ -92,7 +92,7 @@ export async function telegramCommand(db, userId, command, argument, env, { fetc
             if (argument.trim() && !/^[1-9]\d{0,4}$/.test(argument.trim())) return 'Usá /dividendos o indicá una página, por ejemplo /dividendos 2.';
             const page = Number(argument.trim() || '1'), pages = Math.ceil(events.length / 30);
             if (page > pages) return `Esa página no existe. Hay ${pages} ${pages === 1 ? 'página' : 'páginas'}.`;
-            return `💸 Próximos dividendos · página ${page}/${pages}\n${events.slice((page - 1) * 30, page * 30).map(e => `${e.payDate} · ${e.name} · ${money(e.estimatedGross, 'USD')} brutos${e.estimated ? ' (estimado)' : ''}`).join('\n')}${page < pages ? `\nMás pagos: /dividendos ${page + 1}` : ''}${incomplete ? '\nAlgunas posiciones no se pudieron consultar.' : ''}`;
+            return `📆 Próximos dividendos · página ${page}/${pages}\n${events.slice((page - 1) * 30, page * 30).map(e => `${e.payDate} · ${e.name} · ${money(e.estimatedGross, 'USD')} brutos${e.estimated ? ' (estimado)' : ''}`).join('\n')}${page < pages ? `\nMás pagos: /dividendos ${page + 1}` : ''}${incomplete ? '\nAlgunas posiciones no se pudieron consultar.' : ''}`;
         } catch { return 'No se pudieron consultar los dividendos. Intentá nuevamente.'; }
     }
     if (command === 'activo' && !argument.trim()) return 'Indicá el activo, por ejemplo: /activo SOL';
@@ -107,14 +107,14 @@ export async function telegramCommand(db, userId, command, argument, env, { fetc
         selected = selected.slice((page - 1) * 25, page * 25);
     }
     const { rows, fx: exchange } = await priced(selected, fetcher, now, { quotes, stocks, fx });
-    if (command === 'activo') return `📊 Detalle de activo\n\n${rows.slice(0, 20).map(detail).join('\n\n')}${rows.length > 20 ? '\nSe muestran las primeras 20 posiciones.' : ''}`;
-    if (command === 'activos') return `📋 Tus activos (${totalPositions}) · página ${page}/${pages}\n\n${rows.map(detail).join('\n\n')}${page < pages ? `\n\nMás posiciones: /activos ${page + 1}` : ''}`;
+    if (command === 'activo') return `🔍 Detalle de activo\n\n${rows.slice(0, 20).map(detail).join('\n\n')}${rows.length > 20 ? '\nSe muestran las primeras 20 posiciones.' : ''}`;
+    if (command === 'activos') return `💸 Tus activos (${totalPositions}) · página ${page}/${pages}\n\n${rows.map(detail).join('\n\n')}${page < pages ? `\n\nMás posiciones: /activos ${page + 1}` : ''}`;
     const currency = portfolio.preferences?.display === 'ARS' ? 'ARS' : 'USD';
     const values = rows.map(row => convert(row.value, row.currency, currency, exchange));
     if (command === 'distribucion') {
         const groups = new Map(); rows.forEach((row, index) => { const group = groups.get(row.kind) || []; group.push(values[index]); groups.set(row.kind, group); });
         const lines = [...groups].map(([kind, amounts]) => `${names[kind] || kind}: ${amounts.every(Number.isFinite) ? money(amounts.reduce((a, b) => a + b, 0), currency) : 'No disponible (faltan precios o conversión)'}`);
-        return `📊 Distribución (${currency})\n${lines.join('\n')}${exchange ? `\nConversión: ${exchange.source}.` : ''}`;
+        return `🎛️ Distribución (${currency})\n${lines.join('\n')}${exchange ? `\nConversión: ${exchange.source}.` : ''}`;
     }
     if (command === 'cartera') {
         const allValues = values.every(Number.isFinite), hasCost = rows.every(row => !row.costUnknown);
@@ -122,7 +122,7 @@ export async function telegramCommand(db, userId, command, argument, env, { fetc
         const total = allValues ? values.reduce((a, b) => a + b, 0) : NaN;
         const cost = hasCost && costs.every(Number.isFinite) ? costs.reduce((a, b) => a + b, 0) : NaN;
         const result = Number.isFinite(total) && Number.isFinite(cost) ? total - cost : NaN;
-        return `💼 Tu cartera (${currency})\nValor actual: ${money(total, currency)}\nMonto invertido: ${money(cost, currency)}\nResultado: ${Number.isFinite(result) ? `${money(result, currency)} (${result >= 0 ? '+' : ''}${number(cost > 0 ? result / cost * 100 : NaN)}%)` : 'No disponible'}${!allValues ? '\nFaltan cotizaciones o conversiones para calcular el total.' : ''}${!hasCost ? '\nHay posiciones con costo desconocido.' : ''}${exchange ? `\nConversión: ${exchange.source}.` : ''}`;
+        return `📊 Tu cartera (${currency})\nValor actual: ${money(total, currency)}\nMonto invertido: ${money(cost, currency)}\nResultado: ${Number.isFinite(result) ? `${money(result, currency)} (${result >= 0 ? '+' : ''}${number(cost > 0 ? result / cost * 100 : NaN)}%)` : 'No disponible'}${!allValues ? '\nFaltan cotizaciones o conversiones para calcular el total.' : ''}${!hasCost ? '\nHay posiciones con costo desconocido.' : ''}${exchange ? `\nConversión: ${exchange.source}.` : ''}`;
     }
     return HELP;
 }
