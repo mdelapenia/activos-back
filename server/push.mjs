@@ -146,7 +146,7 @@ function dividendPushPayload(alert, event, now = Date.now(), test = false) {
     const amount = event.complete
         ? ` Estimado bruto: ${new Intl.NumberFormat('es-AR', {
             style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4
-        }).format(event.total)} 💰. `
+        }).format(event.total)}. 💰 `
         : '';
     return {
         title: test
