@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { digest, HttpError, newToken } from './security.mjs';
+import { telegramCommand } from './telegram-commands.mjs';
 
 function config(env) {
     const token = env.TELEGRAM_BOT_TOKEN || '', username = (env.TELEGRAM_BOT_USERNAME || '').replace(/^@/, ''), secret = env.TELEGRAM_WEBHOOK_SECRET || '', webhook = env.TELEGRAM_WEBHOOK_URL || '';
@@ -33,14 +34,34 @@ export async function telegramConnect(db, user, env, now = Date.now(), fetcher =
     return { url: `https://t.me/${settings.username}?start=${token}` };
 }
 
-export async function telegramWebhook(db, env, header, body, now = Date.now()) {
+export async function telegramWebhook(db, env, header, body, now = Date.now(), { commandReply = telegramCommand, send = sendTelegram } = {}) {
     const settings = config(env), expected = Buffer.from(settings.secret), actual = Buffer.from(typeof header === 'string' ? header : '');
     if (!settings.configured || expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new HttpError(403, 'Solicitud no autorizada.');
-    const message = body?.message, chat = message?.chat, match = typeof message?.text === 'string' && message.text.match(/^\/start ([\w-]{43})$/);
-    if (chat?.type !== 'private' || !Number.isSafeInteger(chat.id) || chat.id <= 0 || message.from?.id !== chat.id || !match) return { ok: true };
-    const code = await db.collection('telegram_link_codes').findOneAndDelete({ _id: digest(match[1]), expiresAt: { $gt: new Date(now) } });
-    if (!code) return { ok: true };
-    await db.collection('telegram_subscriptions').updateOne({ _id: code.userId }, { $set: { userId: code.userId, chatId: String(chat.id), updatedAt: new Date(now) } }, { upsert: true });
+    const message = body?.message, chat = message?.chat, text = typeof message?.text === 'string' ? message.text.trim() : '';
+    if (chat?.type !== 'private' || !Number.isSafeInteger(chat.id) || chat.id <= 0 || message.from?.id !== chat.id) return { ok: true };
+    const match = text.match(/^\/start ([\w-]{43})$/);
+    if (match) {
+        const code = await db.collection('telegram_link_codes').findOneAndDelete({ _id: digest(match[1]), expiresAt: { $gt: new Date(now) } });
+        if (!code) return { ok: true };
+        await db.collection('telegram_subscriptions').updateOne({ _id: code.userId }, { $set: { userId: code.userId, chatId: String(chat.id), updatedAt: new Date(now) } }, { upsert: true });
+        return { ok: true };
+    }
+    const command = text.match(/^\/(cartera|activos|activo|distribucion|dividendos|alertas|dolar|ayuda)(?:@[A-Za-z0-9_]+)?(?:\s+(.{1,150}))?$/i);
+    if (!command) return { ok: true };
+    const rows = await db.collection('telegram_subscriptions').find({ chatId: String(chat.id) }).limit(2).toArray();
+    if (rows.length !== 1) {
+        await send(db, { chatId: String(chat.id) }, { title: 'Alza', body: rows.length ? 'Este chat está vinculado a más de una cuenta. Desconectalo de las demás desde Alza para poder consultar la cartera.' : 'Vinculá primero tu cuenta desde Alza → Configuración → Notificaciones → Telegram.' }, env);
+        return { ok: true };
+    }
+    const user = await db.collection('users').findOne({ _id: rows[0].userId, disabled: { $ne: true } }, { projection: { _id: 1 } });
+    if (!user) return { ok: true };
+    const reply = await commandReply(db, user._id, command[1].toLowerCase(), command[2] || '', env, { now });
+    let chunk = '';
+    for (const line of String(reply).split('\n')) {
+        if (chunk.length + line.length + 1 > 3500 && chunk) { await send(db, rows[0], { title: 'Alza', body: chunk }, env); chunk = ''; }
+        chunk += `${chunk ? '\n' : ''}${line.slice(0, 3400)}`;
+    }
+    if (chunk) await send(db, rows[0], { title: 'Alza', body: chunk }, env);
     return { ok: true };
 }
 

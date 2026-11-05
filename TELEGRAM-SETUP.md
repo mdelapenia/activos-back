@@ -6,3 +6,5 @@
 4. Volvé a Alza y enviá una prueba. Podés desconectarlo desde el mismo lugar.
 
 El webhook se registra al iniciar la vinculación y reemplaza cualquier webhook previo del mismo bot. Las alertas automáticas de precio y dividendos usan el mismo contenido y horario de no molestar que push; requieren que el proceso del backend esté en ejecución. El token del bot es secreto y no debe compartirse ni incluirse en el frontend.
+
+En el chat privado vinculado, `/ayuda` muestra los comandos de consulta: `/cartera`, `/activos`, `/activo SOL`, `/distribucion`, `/dividendos`, `/alertas` y `/dolar`. Los comandos no modifican la cartera. Si una misma cuenta de Telegram está vinculada a más de una cuenta de Alza, las consultas quedan bloqueadas hasta desconectar las demás.
