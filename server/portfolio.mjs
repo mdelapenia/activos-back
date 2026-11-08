@@ -16,7 +16,7 @@ export function validatePortfolio(raw) {
         if (!i || !text(i.id, 128) || ids.has(i.id) || !text(i.name, 70) || !(positive(i.amount) || (i.kind === 'crypto' && i.costUnknown === true && i.amount === 0))) return invalid();
         if (i.costUnknown !== undefined && (i.costUnknown !== true || i.kind !== 'crypto' || i.amount !== 0)) return invalid();
         ids.add(i.id);
-        if (!['USD', 'ARS'].includes(i.currency) || !['rate', 'cedear', 'crypto', 'stock', 'arg-stock', 'bond', 'fund'].includes(i.kind)) return invalid();
+        if (!['USD', 'ARS'].includes(i.currency) || !['rate', 'cedear', 'crypto', 'stock', 'arg-stock', 'bond', 'fund', 'morpho'].includes(i.kind)) return invalid();
         if ((i.kind === 'stock' && i.currency !== 'USD') || (['arg-stock', 'bond', 'fund'].includes(i.kind) && i.currency !== 'ARS')) return invalid();
         if (typeof i.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(i.date)) return invalid();
         const date = new Date(`${i.date}T12:00:00Z`);
@@ -72,7 +72,7 @@ export function validatePortfolio(raw) {
     if (p.quietHours !== undefined && (!p.quietHours || typeof p.quietHours !== 'object' || typeof p.quietHours.enabled !== 'boolean' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(p.quietHours.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(p.quietHours.end) || (p.quietHours.enabled && p.quietHours.start === p.quietHours.end))) return invalid();
     if (p.allocationTargets !== undefined) {
         const keys = ['rate', 'cedear', 'index', 'stock', 'crypto'];
-        const optionalKeys = ['arg-stock', 'bond', 'fund'];
+        const optionalKeys = ['arg-stock', 'bond', 'fund', 'morpho'];
         const targets = p.allocationTargets;
         if (!targets || typeof targets !== 'object' || Array.isArray(targets) || Object.keys(targets).some(key => ![...keys, ...optionalKeys].includes(key)) || keys.some(key => !(key in targets)) || [...keys, ...optionalKeys].some(key => targets[key] !== undefined && (typeof targets[key] !== 'number' || !Number.isFinite(targets[key]) || targets[key] < 0 || targets[key] > 100)) || Math.abs([...keys, ...optionalKeys].reduce((sum, key) => sum + (targets[key] ?? 0), 0) - 100) > 0.000001) return invalid();
     }

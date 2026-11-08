@@ -8,7 +8,7 @@ test('calcula el aporte mínimo para alcanzar la distribución sin vender', () =
     const result = calculateAllocation(values, targets);
     assert.equal(result.total, 100);
     assert.equal(result.totalContribution, 50);
-    assert.deepEqual(result.contributions, { rate: 25, cedear: 0, index: 0, stock: 0, crypto: 25, 'arg-stock': 0, bond: 0, fund: 0 });
+    assert.deepEqual(result.contributions, { rate: 25, cedear: 0, index: 0, stock: 0, crypto: 25, 'arg-stock': 0, bond: 0, fund: 0, morpho: 0 });
 });
 
 test('detecta posiciones con objetivo cero e impide cálculos con valores inválidos', () => {

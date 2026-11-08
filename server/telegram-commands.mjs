@@ -5,7 +5,7 @@ import { stockQuotes } from './stock-quotes.mjs';
 import { walletAddresses, walletHoldings } from './wallets.mjs';
 
 const aliases = { btc: 'bitcoin', eth: 'ethereum', sol: 'solana', usdc: 'usd-coin', usdt: 'tether', bnb: 'binancecoin' };
-const names = { crypto: 'Cripto', stock: 'Acciones', cedear: 'CEDEARs', 'arg-stock': 'Acciones argentinas', bond: 'Bonos', fund: 'Fondos', rate: 'Con tasa' };
+const names = { crypto: 'Cripto', stock: 'Acciones', cedear: 'CEDEARs', 'arg-stock': 'Acciones argentinas', bond: 'Bonos', fund: 'Fondos', morpho: 'Morpho', rate: 'Con tasa' };
 const money = (amount, currency) => Number.isFinite(amount) ? new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount) : 'No disponible';
 const number = value => Number.isFinite(value) ? new Intl.NumberFormat('es-AR', { maximumSignificantDigits: 10 }).format(value) : 'No disponible';
 const today = now => new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
