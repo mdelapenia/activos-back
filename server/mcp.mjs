@@ -49,7 +49,12 @@ function authPage(request, error = '') {
     const write = request.scopes.includes(WRITE)
         ? `<label class="permission"><input type="checkbox" name="grant_write" value="yes"><span>Permitir que este agente agregue, edite o elimine inversiones.</span></label>`
         : '<p class="note">Este agente solo solicitó acceso de lectura.</p>';
-    return `<section class="card"><p class="eyebrow">AUTORIZACIÓN SEGURA</p><h1>Conectar ${client}<span class="sig">.</span></h1><p class="intro">Iniciá sesión en Activos y elegí qué puede hacer este agente en tu cuenta.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${id}"><label class="field" for="email">Correo electrónico<input id="email" name="email" type="email" autocomplete="username" maxlength="254" required></label><label class="field" for="pin">PIN de Activos<input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="current-password" required></label><label class="permission"><input type="checkbox" checked disabled><span>Consultar tus inversiones y preferencias básicas (necesario).</span></label>${write}<p class="note">Podés revocar el acceso desde Configuración → Agentes IA. Activos no comparte tu PIN con el proveedor de IA.</p><div class="actions"><button name="approve" value="yes" type="submit">Autorizar agente</button><button class="secondary" name="approve" value="no" type="submit" formnovalidate>Cancelar</button></div></form></section>`;
+    return `<section class="card"><p class="eyebrow">INICIAR SESIÓN</p><h1>Conectar ${client}<span class="sig">.</span></h1><p class="intro">Ingresá el mismo correo y PIN que usás para entrar a Activos. Después de validar tus datos, se completará la conexión con este agente.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${id}"><label class="field" for="email">Correo electrónico<input id="email" name="email" type="email" autocomplete="username" maxlength="254" required></label><label class="field" for="pin">PIN de Activos<input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="current-password" required></label><label class="permission"><input type="checkbox" checked disabled><span>Consultar tus inversiones y preferencias básicas (necesario).</span></label>${write}<p class="note">Al continuar, iniciás sesión y autorizás solo los permisos seleccionados. Podés revocar el acceso desde Configuración → Agentes IA. Activos no comparte tu PIN con el proveedor.</p><div class="actions"><button name="approve" value="yes" type="submit">Iniciar sesión y conectar</button><button class="secondary" name="approve" value="no" type="submit" formnovalidate>Cancelar</button></div></form></section>`;
+}
+
+function completedAuthorizationPage(env) {
+    const app = escapeHtml(issuer(env));
+    return `<section class="card"><p class="eyebrow">ESTADO DE LA CONEXIÓN</p><h1>Ya está<span class="sig">.</span></h1><p class="intro">Este paso ya no está activo. Si recién autorizaste, volvé al agente para que termine; no reenvíes el formulario. Si todavía no aparece conectado, volvé a Activos y tocá “Ya autoricé” para comprobarlo. Si no llegaste a autorizar, iniciá una conexión nueva desde el agente.</p><div class="actions"><a href="${app}" style="display:grid;place-items:center;min-height:44px;padding:10px 16px;border:1px solid transparent;border-radius:11px;background:#c3a773;color:#171510;font-size:13px;font-weight:650;text-decoration:none">Volver a Activos</a></div></section>`;
 }
 
 async function readForm(req) {
@@ -113,7 +118,7 @@ async function formOAuthGrant(db, req, res, env, now) {
     const id = form.get('request_id') || '';
     if (!/^[\da-f-]{36}$/i.test(id)) return json(res, 400, { error: 'La solicitud de autorización no es válida. Volvé a intentarlo.' });
     const authorization = await db.collection('oauth_requests').findOne({ _id: id, expiresAt: { $gt: new Date(now) } });
-    if (!authorization) return json(res, 400, { error: 'La autorización venció o ya se usó. Volvé a iniciar la conexión desde Claude.' });
+    if (!authorization) return html(res, completedAuthorizationPage(env), 409);
     const client = await db.collection('oauth_clients').findOne({ _id: authorization.clientId });
     if (!client || !client.redirectUris.includes(authorization.redirectUri)) return json(res, 400, { error: 'El cliente ya no está disponible.' });
     if (form.get('approve') !== 'yes') {
@@ -130,6 +135,10 @@ async function formOAuthGrant(db, req, res, env, now) {
     const user = await db.collection('users').findOne({ email });
     const verified = await verifyPin(pin, user?.pinHash);
     if (!verified || !user || user.disabled) return html(res, authPage({ ...authorization, id: authorization._id }, 'Correo o PIN incorrectos.'));
+    const consumed = await db.collection('oauth_requests').findOneAndDelete({
+        _id: id, expiresAt: { $gt: new Date(now) },
+    });
+    if (!consumed) return html(res, completedAuthorizationPage(env), 409);
     const grantedScopes = [READ, ...(authorization.scopes.includes(WRITE) && form.get('grant_write') === 'yes' ? [WRITE] : [])];
     await db.collection('oauth_grants').updateOne(
         { userId: user._id, clientId: authorization.clientId },
@@ -143,7 +152,6 @@ async function formOAuthGrant(db, req, res, env, now) {
         scopes: grantedScopes, resource: authorization.resource,
         expiresAt: new Date(now + 5 * 60_000),
     });
-    await db.collection('oauth_requests').deleteOne({ _id: id });
     res.statusCode = 303;
     res.setHeader('Location', authorizeRedirect(authorization.redirectUri, { code, state: authorization.state }));
     return res.end();

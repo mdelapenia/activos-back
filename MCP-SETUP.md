@@ -15,6 +15,8 @@ En **Configuración → Agentes IA** de Activos, usá **Abrir ChatGPT** o **Abri
 
 Si actualizás el servidor y el cliente todavía muestra que no hay herramientas, eliminá esa conexión guardada en ChatGPT/Claude y volvé a agregarla para que consulte nuevamente la lista MCP.
 
+Después de autorizar, volvé a **Configuración → Agentes IA** en Activos y tocá **Ya autoricé**. Si el agente aparece en la lista, regresá a ChatGPT/Claude y actualizá el conector; no vuelvas a enviar el formulario de autorización que ya completaste.
+
 La lectura comparte nombres de activos, tipo, monto, moneda, unidades, fechas y preferencias básicas. El permiso de escritura es opcional: permite agregar, reemplazar o eliminar posiciones, pero no operar, mover fondos ni editar ventas, alertas, importaciones o claves. Las solicitudes de cambio deben revisarse en el cliente de IA. Los datos enviados al agente quedan sujetos a las políticas del proveedor.
 
 Cada conexión se puede revocar desde **Configuración → Agentes IA**. La revocación invalida tanto tokens de acceso como de renovación. MCP es ahora la única integración de agentes de IA disponible dentro de Activos; no requiere guardar API keys.
