@@ -204,14 +204,18 @@ test('OAuth MCP emite tokens PKCE, permite cambios autorizados y revoca el acces
     });
     const page = await fetch(authorizationUrl);
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /Permitir cambios en inversiones/);
-    const oauthCookie = page.headers.get('set-cookie').split(';')[0];
+    const pageHtml = await page.text();
+    assert.match(pageHtml, /Permitir que este agente agregue, edite o elimine inversiones/);
+    assert.match(pageHtml, new RegExp(`action="${origin}/oauth/authorize"`));
+    assert.match(page.headers.get('content-security-policy'), new RegExp(`form-action 'self' ${origin}`));
+    const requestId = /name="request_id" value="([^"]+)"/.exec(pageHtml)?.[1];
+    assert.ok(requestId);
     const approval = await fetch(`${base}/oauth/authorize`, {
         method: 'POST', headers: {
-            Origin: origin, Cookie: oauthCookie, 'Content-Type': 'application/x-www-form-urlencoded',
+            Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({
-            request_id: oauthCookie.split('=')[1], email: 'a@example.test', pin,
+            request_id: requestId, email: 'a@example.test', pin,
             approve: 'yes', grant_write: 'yes',
         }),
         redirect: 'manual',
@@ -259,7 +263,8 @@ test('OAuth MCP emite tokens PKCE, permite cambios autorizados y revoca el acces
     const user = await db.collection('users').findOne({ email: 'a@example.test' });
     await db.collection('oauth_grants').updateOne({ userId: user._id, clientId }, { $set: { scopes: ['portfolio:read'] } });
     const deniedWrite = await callMcp({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'remove_investment', arguments: { id: savedInvestment.id } } });
-    assert.equal((await deniedWrite.json()).result.isError, true);
+    assert.equal(deniedWrite.status, 401);
+    assert.equal((await deniedWrite.json()).error, 'Se requiere autorización OAuth.');
     assert.equal((await call('mcp/authorizations', { method: 'DELETE', body: { id: clientId }, cookie })).status, 200);
     assert.equal((await callMcp({ jsonrpc: '2.0', id: 3, method: 'tools/list' })).status, 401);
 });

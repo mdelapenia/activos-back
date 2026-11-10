@@ -50,21 +50,22 @@ function noCache(res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
 }
 
-function html(res, body, status = 200) {
+function html(res, body, env, status = 200) {
     res.statusCode = status;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; form-action 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'");
+    res.setHeader('Content-Security-Policy', `default-src 'none'; img-src 'self'; form-action 'self' ${escapeHtml(issuer(env))}; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'`);
     res.setHeader('X-Frame-Options', 'DENY');
     res.end(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Conectar agente · Activos</title><style>*{box-sizing:border-box}body{margin:0;min-height:100dvh;background:#0a0a09;color:#f0f0eb;font:14px/1.5 Geist,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.page{display:grid;min-height:100dvh;place-items:center;padding:48px 20px}.wrap{width:min(100%,430px)}.brand{display:flex;align-items:center;gap:10px;margin-bottom:28px;font-size:20px;font-weight:500;letter-spacing:-.04em}.brand img{width:32px;height:32px;object-fit:contain}.sig{color:#c3a773}.card{padding:30px;border:1px solid #30302d;border-radius:22px;background:linear-gradient(145deg,rgba(195,167,115,.07),transparent 40%),#141413;box-shadow:0 24px 80px rgba(0,0,0,.38)}.eyebrow{margin:0 0 12px;color:#aaa99f;font:10px/1.4 "Geist Mono",ui-monospace,monospace;letter-spacing:.13em}.card h1{margin:0;font-size:32px;font-weight:350;line-height:1.12;letter-spacing:-.045em}.intro{margin:12px 0 24px;color:#aaa99f;font-size:13px;line-height:1.65}.field{display:block;margin:18px 0 0;color:#aaa99f;font-size:12px}.field input{display:block;width:100%;height:46px;margin-top:8px;padding:0 14px;border:1px solid #383835;border-radius:11px;outline:none;background:#1a1a19;color:#f0f0eb;font:inherit;font-size:14px}.field input:focus{border-color:#c3a773}.permission{display:flex;align-items:flex-start;gap:9px;margin:17px 0 0;color:#c5c4bc;font-size:12px;line-height:1.55}.permission input{width:15px;height:15px;margin:1px 0 0;accent-color:#c3a773;flex:none}.note{margin:18px 0 0;color:#8f8e86;font-size:11px;line-height:1.6}.actions{display:grid;gap:9px;margin-top:22px}.actions button{min-height:44px;padding:10px 16px;border:1px solid transparent;border-radius:11px;background:#c3a773;color:#171510;font-size:13px;font-weight:650;cursor:pointer}.actions button:hover{filter:brightness(1.07)}.actions .secondary{border-color:#3a3a36;background:#1c1c1a;color:#dddcd5}.error{margin:12px 0;padding:10px 12px;border:1px solid #754440;border-radius:10px;background:#321f1d;color:#ffb4a9;font-size:12px}.foot{margin:18px 0 0;text-align:center;color:#797870;font-size:10px}@media(max-width:480px){.page{padding:32px 18px}.card{padding:24px}}</style><main class="page"><div class="wrap"><div class="brand"><img src="/icon.png" alt="">alza<span class="sig">.</span></div>${body}<p class="foot">Tu cartera personal · Conexión segura con Activos</p></div></main></html>`);
 }
 
-function authPage(request, error = '') {
+function authPage(request, env, error = '') {
     const client = escapeHtml(request.clientName);
     const id = escapeHtml(request.id);
+    const authorizeEndpoint = `${escapeHtml(issuer(env))}/oauth/authorize`;
     const write = request.scopes.includes(WRITE)
         ? `<label class="permission"><input type="checkbox" name="grant_write" value="yes"><span>Permitir que este agente agregue, edite o elimine inversiones.</span></label>`
         : '<p class="note">Este agente solo solicitó acceso de lectura.</p>';
-    return `<section class="card"><p class="eyebrow">INICIAR SESIÓN</p><h1>Conectar ${client}<span class="sig">.</span></h1><p class="intro">Ingresá el mismo correo y PIN que usás para entrar a Activos. Después de validar tus datos, se completará la conexión con este agente.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${id}"><label class="field" for="email">Correo electrónico<input id="email" name="email" type="email" autocomplete="username" maxlength="254" required></label><label class="field" for="pin">PIN de Activos<input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="current-password" required></label><label class="permission"><input type="checkbox" checked disabled><span>Consultar tus inversiones y preferencias básicas (necesario).</span></label>${write}<p class="note">Al continuar, iniciás sesión y autorizás solo los permisos seleccionados. Podés revocar el acceso desde Configuración → Agentes IA. Activos no comparte tu PIN con el proveedor.</p><div class="actions"><button name="approve" value="yes" type="submit">Iniciar sesión y conectar</button><button class="secondary" name="approve" value="no" type="submit" formnovalidate>Cancelar</button></div></form></section>`;
+    return `<section class="card"><p class="eyebrow">INICIAR SESIÓN</p><h1>Conectar ${client}<span class="sig">.</span></h1><p class="intro">Ingresá el mismo correo y PIN que usás para entrar a Activos. Después de validar tus datos, se completará la conexión con este agente.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form method="post" action="${authorizeEndpoint}"><input type="hidden" name="request_id" value="${id}"><label class="field" for="email">Correo electrónico<input id="email" name="email" type="email" autocomplete="username" maxlength="254" required></label><label class="field" for="pin">PIN de Activos<input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="current-password" required></label><label class="permission"><input type="checkbox" checked disabled><span>Consultar tus inversiones y preferencias básicas (necesario).</span></label>${write}<p class="note">Al continuar, iniciás sesión y autorizás solo los permisos seleccionados. Podés revocar el acceso desde Configuración → Agentes IA. Activos no comparte tu PIN con el proveedor.</p><div class="actions"><button name="approve" value="yes" type="submit">Iniciar sesión y conectar</button><button class="secondary" name="approve" value="no" type="submit" formnovalidate>Cancelar</button></div></form></section>`;
 }
 
 function completedAuthorizationPage(env) {
@@ -115,14 +116,14 @@ async function formOAuthGrant(db, req, res, env, now) {
             || !scopes.includes(READ) || scopes.some(scope => ![READ, WRITE].includes(scope))
             || url.searchParams.get('resource') !== resource(env) || state.length > 1024) {
             res.statusCode = 400;
-            return html(res, '<h1>No se pudo iniciar la autorización</h1><p>El cliente o la solicitud no son válidos. Volvé a intentarlo desde la aplicación.</p>', 400);
+            return html(res, '<h1>No se pudo iniciar la autorización</h1><p>El cliente o la solicitud no son válidos. Volvé a intentarlo desde la aplicación.</p>', env, 400);
         }
         const id = randomUUID();
         await db.collection('oauth_requests').insertOne({
             _id: id, clientId, clientName: client.name, redirectUri, state, challenge, scopes,
             resource: resource(env), expiresAt: new Date(now + AUTH_REQUEST_SECONDS * 1000),
         });
-        return html(res, authPage({ id, clientName: client.name, scopes }));
+        return html(res, authPage({ id, clientName: client.name, scopes }, env), env);
     }
     if (req.method !== 'POST') {
         res.setHeader('Allow', 'GET, POST');
@@ -133,7 +134,7 @@ async function formOAuthGrant(db, req, res, env, now) {
     const id = form.get('request_id') || '';
     if (!/^[\da-f-]{36}$/i.test(id)) return json(res, 400, { error: 'La solicitud de autorización no es válida. Volvé a intentarlo.' });
     const authorization = await db.collection('oauth_requests').findOne({ _id: id, expiresAt: { $gt: new Date(now) } });
-    if (!authorization) return html(res, completedAuthorizationPage(env), 409);
+    if (!authorization) return html(res, completedAuthorizationPage(env), env, 409);
     const client = await db.collection('oauth_clients').findOne({ _id: authorization.clientId });
     if (!client || !client.redirectUris.includes(authorization.redirectUri)) return json(res, 400, { error: 'El cliente ya no está disponible.' });
     if (form.get('approve') !== 'yes') {
@@ -145,15 +146,15 @@ async function formOAuthGrant(db, req, res, env, now) {
     const email = normalizeEmail(form.get('email'));
     const pin = form.get('pin') || '';
     if (!validEmail(email) || !validPin(pin)) {
-        return html(res, authPage({ ...authorization, id: authorization._id }, 'Correo o PIN incorrectos.'));
+        return html(res, authPage({ ...authorization, id: authorization._id }, env, 'Correo o PIN incorrectos.'), env);
     }
     const user = await db.collection('users').findOne({ email });
     const verified = await verifyPin(pin, user?.pinHash);
-    if (!verified || !user || user.disabled) return html(res, authPage({ ...authorization, id: authorization._id }, 'Correo o PIN incorrectos.'));
+    if (!verified || !user || user.disabled) return html(res, authPage({ ...authorization, id: authorization._id }, env, 'Correo o PIN incorrectos.'), env);
     const consumed = await db.collection('oauth_requests').findOneAndDelete({
         _id: id, expiresAt: { $gt: new Date(now) },
     });
-    if (!consumed) return html(res, completedAuthorizationPage(env), 409);
+    if (!consumed) return html(res, completedAuthorizationPage(env), env, 409);
     const grantedScopes = [READ, ...(authorization.scopes.includes(WRITE) && form.get('grant_write') === 'yes' ? [WRITE] : [])];
     await db.collection('oauth_grants').updateOne(
         { userId: user._id, clientId: authorization.clientId },
