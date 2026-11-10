@@ -3,12 +3,22 @@ import { createServer } from 'node:http';
 const METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
 const HEADERS = ['content-type', 'x-activos-request'];
 
+export function allowedOrigins(env = process.env) {
+    const origins = new Set(['http://tauri.localhost']);
+    for (const value of [env.APP_ORIGIN, env.DESKTOP_APP_ORIGIN]) {
+        if (!value) continue;
+        try { origins.add(new URL(value).origin); } catch { /* An invalid optional origin is ignored. */ }
+    }
+    return origins;
+}
+
 export function createApiServer(handler, env = process.env) {
     return createServer((req, res) => {
         const origin = req.headers.origin;
-        const allowedOrigin = env.APP_ORIGIN || (env.NODE_ENV !== 'production' ? 'http://localhost:5173' : '');
+        const origins = allowedOrigins(env);
+        if (env.NODE_ENV !== 'production') origins.add('http://localhost:5173');
 
-        if (origin && allowedOrigin && origin === new URL(allowedOrigin).origin) {
+        if (origin && origins.has(origin)) {
             res.setHeader('Access-Control-Allow-Origin', origin);
             res.setHeader('Access-Control-Allow-Credentials', 'true');
             res.setHeader('Vary', 'Origin');
@@ -18,7 +28,7 @@ export function createApiServer(handler, env = process.env) {
             const requestedHeaders = String(req.headers['access-control-request-headers'] || '')
                 .split(',').map(header => header.trim().toLowerCase()).filter(Boolean);
             const requestedMethod = req.headers['access-control-request-method'];
-            if (origin !== allowedOrigin || !requestedMethod || !METHODS.split(', ').includes(requestedMethod)
+            if (!origins.has(origin) || !requestedMethod || !METHODS.split(', ').includes(requestedMethod)
                 || requestedHeaders.some(header => !HEADERS.includes(header))) {
                 res.statusCode = 403;
                 res.setHeader('Content-Type', 'application/json; charset=utf-8');

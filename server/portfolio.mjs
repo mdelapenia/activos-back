@@ -91,6 +91,9 @@ export async function readPortfolio(db, userId) {
     return doc ? { portfolio: doc.portfolio, version: doc.version, mutationId: doc.mutationId } : { portfolio: emptyPortfolio(), version: 0, mutationId: null };
 }
 
+
+
+
 export async function writePortfolio(db, userId, body) {
     if (!body || !Number.isSafeInteger(body.version) || body.version < 0
         || typeof body.mutationId !== 'string' || !/^[a-f0-9-]{36}$/.test(body.mutationId)) return invalid();

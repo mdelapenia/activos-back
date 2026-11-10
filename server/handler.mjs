@@ -6,6 +6,7 @@ import { usInflation } from './inflation.mjs';
 import { getDatabase } from './database.mjs';
 import { digest, hashPin, HttpError, newToken, normalizeEmail, validEmail, validPin, verifyPin } from './security.mjs';
 import { readPortfolio, writePortfolio } from './portfolio.mjs';
+import { allowedOrigins } from './http.mjs';
 import { portfolioDividends, marketDividends } from './dividends.mjs';
 import { earningsCalendar } from './market-calendar.mjs';
 import { stockQuotes, stockHistory } from './stock-quotes.mjs';
@@ -83,9 +84,9 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             if (!methods.includes(method)) { res.setHeader('Allow', methods.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
             if (method !== 'GET' && path !== '/api/telegram/webhook') {
-                const origin = env.APP_ORIGIN || (!production ? 'http://localhost:5173' : '');
-                if (!origin) throw new HttpError(503, 'El acceso todavía no está habilitado.', 'NOT_CONFIGURED');
-                if (req.headers.origin !== new URL(origin).origin || req.headers['x-activos-request'] !== '1') throw new HttpError(403, 'Origen de solicitud no permitido.');
+                const origins = allowedOrigins(env);
+                if (!production) origins.add('http://localhost:5173');
+                if (!origins.has(req.headers.origin) || req.headers['x-activos-request'] !== '1') throw new HttpError(403, 'Origen de solicitud no permitido.');
             }
             const db = await database();
             const now = clock();

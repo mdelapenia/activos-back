@@ -39,3 +39,17 @@ test('habilita preflight autenticado solo para el origen configurado', async () 
     assert.equal(denied.status, 403);
     assert.equal(denied.headers.get('access-control-allow-origin'), null);
 });
+
+test('habilita el frontend local en localhost:5173 sin cambiar el origen configurado', async () => {
+    const response = await fetch(`${base}/api/login`, {
+        method: 'OPTIONS',
+        headers: {
+            Origin: 'http://localhost:5173',
+            'Access-Control-Request-Method': 'POST',
+            'Access-Control-Request-Headers': 'content-type,x-activos-request',
+        },
+    });
+    assert.equal(response.status, 204);
+    assert.equal(response.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+    assert.equal(response.headers.get('access-control-allow-credentials'), 'true');
+});
