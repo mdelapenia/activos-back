@@ -17,15 +17,30 @@ const json = (res, status, value) => {
     res.end(JSON.stringify(value));
 };
 
+
 function issuer(env) {
-    const value = env.MCP_ISSUER_URL || env.APP_ORIGIN || 'http://localhost:5173';
+    const value = env.APP_ORIGIN || 'http://localhost:5173';
     const url = new URL(value);
-    if (url.pathname !== '/' || url.search || url.hash || url.username || url.password
-        || (url.protocol !== 'https:' && !(url.protocol === 'http:' && url.hostname === 'localhost'))) {
-        throw new HttpError(503, 'MCP_ISSUER_URL debe ser un origen HTTPS público.', 'NOT_CONFIGURED');
+
+    if (
+        url.pathname !== '/' ||
+        url.search ||
+        url.hash ||
+        url.username ||
+        url.password ||
+        (url.protocol !== 'https:' &&
+            !(url.protocol === 'http:' && url.hostname === 'localhost'))
+    ) {
+        throw new HttpError(
+            503,
+            'APP_ORIGIN debe ser un origen HTTPS público.',
+            'NOT_CONFIGURED'
+        );
     }
+
     return url.origin;
 }
+
 
 function resource(env) { return `${issuer(env)}/mcp`; }
 
@@ -284,7 +299,7 @@ async function callTool(db, userId, scopes, name, args) {
         const { portfolio, version } = await readPortfolio(db, userId);
         return textResult({ version, investments: portfolio.investments, preferences: { display: portfolio.preferences.display, dollar: portfolio.preferences.dollar, horizon: portfolio.preferences.horizon } });
     }
-    if (![ 'add_investment', 'update_investment', 'remove_investment' ].includes(name)) return textResult(`Herramienta desconocida: ${name}`, true);
+    if (!['add_investment', 'update_investment', 'remove_investment'].includes(name)) return textResult(`Herramienta desconocida: ${name}`, true);
     if (!scopes.includes(WRITE)) return textResult('Este cliente no tiene permiso de escritura. Revocalo y volvé a autorizarlo habilitando los cambios de cartera.', true);
     if (!args || typeof args !== 'object' || Array.isArray(args)) return textResult('Los argumentos no son válidos.', true);
     try {
