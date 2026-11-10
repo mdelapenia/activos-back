@@ -207,7 +207,8 @@ test('OAuth MCP emite tokens PKCE, permite cambios autorizados y revoca el acces
     const pageHtml = await page.text();
     assert.match(pageHtml, /Permitir que este agente agregue, edite o elimine inversiones/);
     assert.match(pageHtml, new RegExp(`action="${origin}/oauth/authorize"`));
-    assert.match(page.headers.get('content-security-policy'), new RegExp(`form-action 'self' ${origin}`));
+    assert.match(pageHtml, /class="btn-primary" name="approve" value="yes" type="submit">Conectar/);
+    assert.ok(page.headers.get('content-security-policy').includes(`form-action 'self' ${origin} http://127.0.0.1:4567`));
     const requestId = /name="request_id" value="([^"]+)"/.exec(pageHtml)?.[1];
     assert.ok(requestId);
     const approval = await fetch(`${base}/oauth/authorize`, {
@@ -224,17 +225,21 @@ test('OAuth MCP emite tokens PKCE, permite cambios autorizados y revoca el acces
     const callback = new URL(approval.headers.get('location'));
     assert.equal(callback.searchParams.get('state'), 'test-state');
     const code = callback.searchParams.get('code');
-    const tokenResponse = await fetch(`${base}/oauth/token`, {
+    const exchangeCode = codeVerifier => fetch(`${base}/oauth/token`, {
         method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
             grant_type: 'authorization_code', client_id: clientId, code,
-            redirect_uri: 'http://127.0.0.1:4567/callback', code_verifier: verifier, resource: `${origin}/mcp`,
+            redirect_uri: 'http://127.0.0.1:4567/callback', code_verifier: codeVerifier, resource: `${origin}/mcp`,
         }),
     });
+    const wrongVerifier = (verifier[0] === 'A' ? 'B' : 'A') + verifier.slice(1);
+    assert.equal((await exchangeCode(wrongVerifier)).status, 400);
+    const tokenResponse = await exchangeCode(verifier);
     assert.equal(tokenResponse.status, 200);
     const tokens = await tokenResponse.json();
     assert.equal(tokens.token_type, 'Bearer');
     assert.equal(tokens.scope, 'portfolio:read portfolio:write');
+    assert.equal((await exchangeCode(verifier)).status, 400, 'el código sigue siendo de un solo uso');
 
     const callMcp = (message) => fetch(`${base}/mcp`, {
         method: 'POST',
