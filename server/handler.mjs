@@ -72,7 +72,6 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             const path = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '');
             const method = req.method;
             const mcpRoute = path === '/mcp' || path.startsWith('/oauth/') || path.startsWith('/.well-known/oauth-'); 
-            function issuer(env) {
                 if (mcpRoute) {
                     const db = await database();
                     if (await handleMcpRequest({ db, req, res, env, now: clock() }) !== false) return;
