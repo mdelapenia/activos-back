@@ -11,7 +11,7 @@ Activos ofrece un servidor MCP remoto en `https://activos-nu.vercel.app/mcp`, pu
 
 ## Conectar ChatGPT o Claude
 
-En cada cliente, agregá un conector remoto/personalizado y pegá `https://activos-nu.vercel.app/mcp`. El nombre y la ubicación de esta opción pueden variar según el plan y la versión de la interfaz del proveedor. Al autorizar, iniciá sesión con tu correo y PIN de Activos; el PIN se envía únicamente a Activos.
+En **Configuración → Agentes IA** de Activos, usá **Abrir ChatGPT** o **Abrir Claude**. En cada cliente, buscá la opción para agregar un conector personalizado/remoto (MCP) y pegá `https://activos-nu.vercel.app/mcp`. La disponibilidad y ubicación pueden variar según el plan o la configuración del espacio de trabajo. Al autorizar, iniciá sesión con tu correo y PIN de Activos; el PIN se envía únicamente a Activos.
 
 La lectura comparte nombres de activos, tipo, monto, moneda, unidades, fechas y preferencias básicas. El permiso de escritura es opcional: permite agregar, reemplazar o eliminar posiciones, pero no operar, mover fondos ni editar ventas, alertas, importaciones o claves. Las solicitudes de cambio deben revisarse en el cliente de IA. Los datos enviados al agente quedan sujetos a las políticas del proveedor.
 
