@@ -1,9 +1,5 @@
-# Asistente de mercado
+# Agentes de IA
 
-Configurar `AI_ENCRYPTION_KEY` en el entorno del servidor con una clave aleatoria de 32 bytes codificada en base64. Se puede generar con `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Conservarla de forma segura y estable: cambiarla impide descifrar las claves ya guardadas. Configurar la misma clave en todas las instancias del backend.
+Se retiraron el chat interno de mercado, el asistente de objetivos y la configuración de API keys. La integración disponible para usar agentes externos es el servidor MCP de Activos: seguí [MCP-SETUP.md](./MCP-SETUP.md).
 
-Cada usuario guarda por separado sus API keys de OpenAI, Anthropic o Gemini desde el chat. La app las cifra con AES-256-GCM y no las devuelve al navegador. Las consultas y búsquedas pueden generar cargos en la cuenta del proveedor. Las suscripciones a las aplicaciones de chat no necesariamente incluyen acceso a sus APIs.
-
-Opcionalmente se pueden definir `OPENAI_CHAT_MODEL`, `CLAUDE_CHAT_MODEL` y `GEMINI_CHAT_MODEL` para cambiar los modelos predeterminados. Los modelos deben admitir las herramientas de búsqueda de su proveedor.
-
-Para conectar ChatGPT o Claude directamente con la cartera mediante MCP, seguí [MCP-SETUP.md](./MCP-SETUP.md). Esa conexión usa OAuth y permisos separados; no requiere guardar API keys.
+Las API keys cifradas que se hubieran guardado antes de este cambio permanecen en la base de datos, pero la aplicación ya no las consulta ni las acepta desde su API. No se borran automáticamente para evitar eliminar credenciales guardadas sin confirmación.

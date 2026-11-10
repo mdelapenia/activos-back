@@ -15,4 +15,4 @@ En **Configuración → Agentes IA** de Activos, usá **Abrir ChatGPT** o **Abri
 
 La lectura comparte nombres de activos, tipo, monto, moneda, unidades, fechas y preferencias básicas. El permiso de escritura es opcional: permite agregar, reemplazar o eliminar posiciones, pero no operar, mover fondos ni editar ventas, alertas, importaciones o claves. Las solicitudes de cambio deben revisarse en el cliente de IA. Los datos enviados al agente quedan sujetos a las políticas del proveedor.
 
-Cada conexión se puede revocar desde **Configuración → Agentes IA**. La revocación invalida tanto tokens de acceso como de renovación. El acceso MCP es independiente de las API keys guardadas para el chat interno de Activos.
+Cada conexión se puede revocar desde **Configuración → Agentes IA**. La revocación invalida tanto tokens de acceso como de renovación. MCP es ahora la única integración de agentes de IA disponible dentro de Activos; no requiere guardar API keys.

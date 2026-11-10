@@ -8,7 +8,6 @@ import { digest, hashPin, HttpError, newToken, normalizeEmail, validEmail, valid
 import { readPortfolio, writePortfolio } from './portfolio.mjs';
 import { portfolioDividends, marketDividends } from './dividends.mjs';
 import { earningsCalendar } from './market-calendar.mjs';
-import { keySettings, marketChat } from './market-ai.mjs';
 import { stockQuotes, stockHistory } from './stock-quotes.mjs';
 import { pushConfig, saveSubscription, removeSubscription, subscriptionStatus, testPush, alertTestPayload } from './push.mjs';
 import { detectWalletNetworks, previewWalletHoldings, walletAddresses, walletHoldings } from './wallets.mjs';
@@ -77,7 +76,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 const db = await database();
                 if (await handleMcpRequest({ db, req, res, env, now: clock() }) !== false) return;
             }
-            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/ai/keys': ['GET', 'POST'], '/api/ai/chat': ['POST'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
+            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
             const telegramMethods = { '/api/telegram': ['GET', 'DELETE'], '/api/telegram/connect': ['POST'], '/api/telegram/test': ['POST'], '/api/telegram/webhook': ['POST'] };
             if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && path !== '/api/wallets/detect' && path !== '/api/wallets/check' && path !== '/api/summaries' && !Object.hasOwn(telegramMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
             const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : path === '/api/wallets/detect' || path === '/api/wallets/check' ? ['POST'] : path === '/api/summaries' ? ['GET', 'PUT'] : telegramMethods[path] || allowed;
@@ -148,8 +147,6 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             if (path === '/api/imports/gmail') return reply(200, method === 'GET' ? await gmailStatus(db, user, env) : await gmailDisconnect(db, user, env));
             if (path === '/api/imports/gmail/sync') return reply(200, await gmailReadImports(db, user, env, fetch, (await jsonBody(req)).sender ?? ''));
             if (path === '/api/imports/gmail/start') return reply(200, await gmailStart(db, user, env, now));
-            if (path === '/api/ai/keys') return reply(200, await keySettings(db, user, env, method === 'POST' ? await jsonBody(req) : null));
-            if (path === '/api/ai/chat') return reply(200, await marketChat(db, user, env, await jsonBody(req)));
             if (path === '/api/passkey/status') {
                 const keys = await db.collection('passkeys').find({ userId: user._id }).toArray();
                 return reply(200, { count: keys.length, keys: keys.map(key => ({ id: key._id, createdAt: key.createdAt || null, lastUsedAt: key.lastUsedAt || null })) });

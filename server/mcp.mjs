@@ -8,7 +8,6 @@ const ACCESS_SECONDS = 60 * 60;
 const REFRESH_SECONDS = 30 * 24 * 60 * 60;
 const AUTH_REQUEST_SECONDS = 10 * 60;
 const MCP_PROTOCOL = '2025-11-25';
-const COOKIE = 'activos_oauth_state';
 
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const json = (res, status, value) => {
@@ -38,18 +37,18 @@ function noCache(res) {
 function html(res, body, status = 200) {
     res.statusCode = status;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Security-Policy', "default-src 'none'; form-action 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'");
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; form-action 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'");
     res.setHeader('X-Frame-Options', 'DENY');
-    res.end(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Conectar agente · Activos</title><style>body{margin:0;background:#10100f;color:#eee;font:16px system-ui,sans-serif}.card{box-sizing:border-box;width:min(460px,calc(100% - 32px));margin:8vh auto;padding:32px;border:1px solid #393936;border-radius:20px;background:#191918}h1{font-size:26px;font-weight:500}p,small{color:#aaa;line-height:1.55}label{display:block;margin:16px 0 7px;font-size:13px;color:#ccc}input[type=email],input[type=password]{box-sizing:border-box;width:100%;padding:12px;border:1px solid #444;border-radius:10px;background:#111;color:#fff;font-size:16px}input[type=checkbox]{margin-right:9px;accent-color:#c3a773}button{width:100%;margin-top:20px;padding:13px;border:0;border-radius:10px;background:#c3a773;color:#15130f;font-weight:700;font-size:15px;cursor:pointer}.error{color:#ff9d9d}</style><main class="card">${body}</main></html>`);
+    res.end(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark"><title>Conectar agente · Activos</title><style>*{box-sizing:border-box}body{margin:0;min-height:100dvh;background:#0a0a09;color:#f0f0eb;font:14px/1.5 Geist,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.page{display:grid;min-height:100dvh;place-items:center;padding:48px 20px}.wrap{width:min(100%,430px)}.brand{display:flex;align-items:center;gap:10px;margin-bottom:28px;font-size:20px;font-weight:500;letter-spacing:-.04em}.brand img{width:32px;height:32px;object-fit:contain}.sig{color:#c3a773}.card{padding:30px;border:1px solid #30302d;border-radius:22px;background:linear-gradient(145deg,rgba(195,167,115,.07),transparent 40%),#141413;box-shadow:0 24px 80px rgba(0,0,0,.38)}.eyebrow{margin:0 0 12px;color:#aaa99f;font:10px/1.4 "Geist Mono",ui-monospace,monospace;letter-spacing:.13em}.card h1{margin:0;font-size:32px;font-weight:350;line-height:1.12;letter-spacing:-.045em}.intro{margin:12px 0 24px;color:#aaa99f;font-size:13px;line-height:1.65}.field{display:block;margin:18px 0 0;color:#aaa99f;font-size:12px}.field input{display:block;width:100%;height:46px;margin-top:8px;padding:0 14px;border:1px solid #383835;border-radius:11px;outline:none;background:#1a1a19;color:#f0f0eb;font:14px inherit}.field input:focus{border-color:#c3a773}.permission{display:flex;align-items:flex-start;gap:9px;margin:17px 0 0;color:#c5c4bc;font-size:12px;line-height:1.55}.permission input{width:15px;height:15px;margin:1px 0 0;accent-color:#c3a773;flex:none}.note{margin:18px 0 0;color:#8f8e86;font-size:11px;line-height:1.6}.actions{display:grid;gap:9px;margin-top:22px}.actions button{min-height:44px;padding:10px 16px;border:1px solid transparent;border-radius:11px;background:#c3a773;color:#171510;font-size:13px;font-weight:650;cursor:pointer}.actions button:hover{filter:brightness(1.07)}.actions .secondary{border-color:#3a3a36;background:#1c1c1a;color:#dddcd5}.error{margin:12px 0;padding:10px 12px;border:1px solid #754440;border-radius:10px;background:#321f1d;color:#ffb4a9;font-size:12px}.foot{margin:18px 0 0;text-align:center;color:#797870;font-size:10px}@media(max-width:480px){.page{padding:32px 18px}.card{padding:24px}}</style><main class="page"><div class="wrap"><div class="brand"><img src="/icon.png" alt="">alza<span class="sig">.</span></div>${body}<p class="foot">Tu cartera personal · Conexión segura con Activos</p></div></main></html>`);
 }
 
 function authPage(request, error = '') {
     const client = escapeHtml(request.clientName);
     const id = escapeHtml(request.id);
     const write = request.scopes.includes(WRITE)
-        ? `<label><input type="checkbox" name="grant_write" value="yes">Permitir cambios en inversiones: agregar, editar y eliminar posiciones</label>`
-        : '<p>Este cliente no solicitó permiso para modificar inversiones.</p>';
-    return `<p>ACTIVOS · AUTORIZACIÓN</p><h1>Conectar ${client}</h1><p>Iniciá sesión y elegí qué puede hacer este agente en tu cuenta.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${id}"><label for="email">Correo electrónico</label><input id="email" name="email" type="email" autocomplete="username" maxlength="254" required><label for="pin">PIN de Activos</label><input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="current-password" required><label><input type="checkbox" name="grant_read" value="yes" checked disabled>Consultar tus inversiones y preferencias básicas (necesario)</label>${write}<p><small>La autorización se puede revocar en cualquier momento desde Configuración → Agentes IA. Activos nunca comparte tu PIN con el proveedor de IA.</small></p><button name="approve" value="yes" type="submit">Autorizar agente</button><button name="approve" value="no" type="submit" formnovalidate>Cancelar</button></form>`;
+        ? `<label class="permission"><input type="checkbox" name="grant_write" value="yes"><span>Permitir que este agente agregue, edite o elimine inversiones.</span></label>`
+        : '<p class="note">Este agente solo solicitó acceso de lectura.</p>';
+    return `<section class="card"><p class="eyebrow">AUTORIZACIÓN SEGURA</p><h1>Conectar ${client}<span class="sig">.</span></h1><p class="intro">Iniciá sesión en Activos y elegí qué puede hacer este agente en tu cuenta.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${id}"><label class="field" for="email">Correo electrónico<input id="email" name="email" type="email" autocomplete="username" maxlength="254" required></label><label class="field" for="pin">PIN de Activos<input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="current-password" required></label><label class="permission"><input type="checkbox" checked disabled><span>Consultar tus inversiones y preferencias básicas (necesario).</span></label>${write}<p class="note">Podés revocar el acceso desde Configuración → Agentes IA. Activos no comparte tu PIN con el proveedor de IA.</p><div class="actions"><button name="approve" value="yes" type="submit">Autorizar agente</button><button class="secondary" name="approve" value="no" type="submit" formnovalidate>Cancelar</button></div></form></section>`;
 }
 
 async function readForm(req) {
@@ -73,14 +72,6 @@ function authorizeRedirect(redirectUri, params) {
     return target.toString();
 }
 
-function cookieValue(req) {
-    return String(req.headers.cookie || '').split(';').map(value => value.trim()).find(value => value.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
-}
-
-function setOAuthCookie(res, id, production, clear = false) {
-    res.setHeader('Set-Cookie', `${COOKIE}=${clear ? '' : id}; Path=/oauth/authorize; HttpOnly; SameSite=Lax${production ? '; Secure' : ''}; Max-Age=${clear ? 0 : AUTH_REQUEST_SECONDS}`);
-}
-
 function validRedirect(uri) {
     try {
         const url = new URL(uri);
@@ -91,7 +82,6 @@ function validRedirect(uri) {
 
 async function formOAuthGrant(db, req, res, env, now) {
     const url = new URL(req.url, 'http://localhost');
-    const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
     if (req.method === 'GET') {
         const clientId = url.searchParams.get('client_id') || '';
         const redirectUri = url.searchParams.get('redirect_uri') || '';
@@ -111,24 +101,22 @@ async function formOAuthGrant(db, req, res, env, now) {
             _id: id, clientId, clientName: client.name, redirectUri, state, challenge, scopes,
             resource: resource(env), expiresAt: new Date(now + AUTH_REQUEST_SECONDS * 1000),
         });
-        setOAuthCookie(res, id, production);
         return html(res, authPage({ id, clientName: client.name, scopes }));
     }
     if (req.method !== 'POST') {
         res.setHeader('Allow', 'GET, POST');
         return json(res, 405, { error: 'Método no permitido.' });
     }
-    if (req.headers.origin && req.headers.origin !== issuer(env)) return json(res, 403, { error: 'Origen de solicitud no permitido.' });
+    if (req.headers.origin !== issuer(env)) return json(res, 403, { error: 'Origen de solicitud no permitido.' });
     const form = await readForm(req);
     const id = form.get('request_id') || '';
-    if (!id || id !== cookieValue(req)) return json(res, 403, { error: 'La solicitud de autorización venció. Volvé a intentarlo.' });
+    if (!/^[\da-f-]{36}$/i.test(id)) return json(res, 400, { error: 'La solicitud de autorización no es válida. Volvé a intentarlo.' });
     const authorization = await db.collection('oauth_requests').findOne({ _id: id, expiresAt: { $gt: new Date(now) } });
-    if (!authorization) return json(res, 400, { error: 'La solicitud de autorización venció. Volvé a intentarlo.' });
+    if (!authorization) return json(res, 400, { error: 'La autorización venció o ya se usó. Volvé a iniciar la conexión desde Claude.' });
     const client = await db.collection('oauth_clients').findOne({ _id: authorization.clientId });
     if (!client || !client.redirectUris.includes(authorization.redirectUri)) return json(res, 400, { error: 'El cliente ya no está disponible.' });
     if (form.get('approve') !== 'yes') {
         await db.collection('oauth_requests').deleteOne({ _id: id });
-        setOAuthCookie(res, '', production, true);
         res.statusCode = 303;
         res.setHeader('Location', authorizeRedirect(authorization.redirectUri, { error: 'access_denied', state: authorization.state }));
         return res.end();
@@ -155,7 +143,6 @@ async function formOAuthGrant(db, req, res, env, now) {
         expiresAt: new Date(now + 5 * 60_000),
     });
     await db.collection('oauth_requests').deleteOne({ _id: id });
-    setOAuthCookie(res, '', production, true);
     res.statusCode = 303;
     res.setHeader('Location', authorizeRedirect(authorization.redirectUri, { code, state: authorization.state }));
     return res.end();
