@@ -19,6 +19,11 @@ export async function ensureIndexes(db) {
         db.collection('gmail_oauth_states').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('passkey_challenges').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('passkeys').createIndex({ userId: 1 }),
+        db.collection('oauth_requests').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+        db.collection('oauth_codes').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+        db.collection('oauth_access_tokens').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+        db.collection('oauth_refresh_tokens').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+        db.collection('oauth_grants').createIndex({ userId: 1, clientId: 1 }, { unique: true }),
     ]);
 }
 

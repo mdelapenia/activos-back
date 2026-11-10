@@ -1,6 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createHash, randomBytes } from 'node:crypto';
 import { MongoClient } from 'mongodb';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { ensureIndexes } from '../server/database.mjs';
@@ -184,4 +185,81 @@ test('cada cuenta puede eliminar solo sus propias passkeys', async () => {
     assert.equal((await call('passkey/remove', { method: 'POST', cookie: bCookie, body: { id: 'status-test' } })).status, 404);
     assert.equal((await call('passkey/remove', { method: 'POST', cookie: aCookie, body: { id: 'status-test' } })).status, 200);
     assert.equal((await call('passkey/status', { cookie: aCookie })).body.count, 0);
+});
+
+test('OAuth MCP emite tokens PKCE, permite cambios autorizados y revoca el acceso', async () => {
+    const registration = await fetch(`${base}/oauth/register`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_name: 'Prueba MCP', redirect_uris: ['http://127.0.0.1:4567/callback'], token_endpoint_auth_method: 'none' }),
+    });
+    assert.equal(registration.status, 201);
+    const { client_id: clientId } = await registration.json();
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const authorizationUrl = new URL(`${base}/oauth/authorize`);
+    authorizationUrl.search = new URLSearchParams({
+        response_type: 'code', client_id: clientId, redirect_uri: 'http://127.0.0.1:4567/callback',
+        scope: 'portfolio:read portfolio:write', state: 'test-state', code_challenge: challenge,
+        code_challenge_method: 'S256', resource: `${origin}/mcp`,
+    });
+    const page = await fetch(authorizationUrl);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /Permitir cambios en inversiones/);
+    const oauthCookie = page.headers.get('set-cookie').split(';')[0];
+    const approval = await fetch(`${base}/oauth/authorize`, {
+        method: 'POST', headers: {
+            Origin: origin, Cookie: oauthCookie, 'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+            request_id: oauthCookie.split('=')[1], email: 'a@example.test', pin,
+            approve: 'yes', grant_write: 'yes',
+        }),
+        redirect: 'manual',
+    });
+    assert.equal(approval.status, 303);
+    const callback = new URL(approval.headers.get('location'));
+    assert.equal(callback.searchParams.get('state'), 'test-state');
+    const code = callback.searchParams.get('code');
+    const tokenResponse = await fetch(`${base}/oauth/token`, {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            grant_type: 'authorization_code', client_id: clientId, code,
+            redirect_uri: 'http://127.0.0.1:4567/callback', code_verifier: verifier, resource: `${origin}/mcp`,
+        }),
+    });
+    assert.equal(tokenResponse.status, 200);
+    const tokens = await tokenResponse.json();
+    assert.equal(tokens.token_type, 'Bearer');
+    assert.equal(tokens.scope, 'portfolio:read portfolio:write');
+
+    const callMcp = (message) => fetch(`${base}/mcp`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${tokens.access_token}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify(message),
+    });
+    const added = await callMcp({
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'add_investment', arguments: { name: 'Tasa', amount: 250, currency: 'USD', date: '2026-01-03', kind: 'rate', rate: 8, period: 'year' } },
+    });
+    const addedResult = await added.json();
+    assert.equal(added.status, 200);
+    assert.equal(addedResult.result.isError, undefined);
+    const savedInvestment = JSON.parse(addedResult.result.content[0].text).investments.find(item => item.name === 'Tasa');
+    assert.ok(savedInvestment);
+
+    const account = await login('a@example.test');
+    const cookie = account.cookie.split(';')[0];
+    const authorizations = await call('mcp/authorizations', { cookie });
+    assert.equal(authorizations.body.authorizations[0].name, 'Prueba MCP');
+    assert.deepEqual(authorizations.body.authorizations[0].scopes, ['portfolio:read', 'portfolio:write']);
+    const user = await db.collection('users').findOne({ email: 'a@example.test' });
+    await db.collection('oauth_grants').updateOne({ userId: user._id, clientId }, { $set: { scopes: ['portfolio:read'] } });
+    const deniedWrite = await callMcp({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'remove_investment', arguments: { id: savedInvestment.id } } });
+    assert.equal((await deniedWrite.json()).result.isError, true);
+    assert.equal((await call('mcp/authorizations', { method: 'DELETE', body: { id: clientId }, cookie })).status, 200);
+    assert.equal((await callMcp({ jsonrpc: '2.0', id: 3, method: 'tools/list' })).status, 401);
 });

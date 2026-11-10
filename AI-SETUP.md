@@ -5,3 +5,5 @@ Configurar `AI_ENCRYPTION_KEY` en el entorno del servidor con una clave aleatori
 Cada usuario guarda por separado sus API keys de OpenAI, Anthropic o Gemini desde el chat. La app las cifra con AES-256-GCM y no las devuelve al navegador. Las consultas y búsquedas pueden generar cargos en la cuenta del proveedor. Las suscripciones a las aplicaciones de chat no necesariamente incluyen acceso a sus APIs.
 
 Opcionalmente se pueden definir `OPENAI_CHAT_MODEL`, `CLAUDE_CHAT_MODEL` y `GEMINI_CHAT_MODEL` para cambiar los modelos predeterminados. Los modelos deben admitir las herramientas de búsqueda de su proveedor.
+
+Para conectar ChatGPT o Claude directamente con la cartera mediante MCP, seguí [MCP-SETUP.md](./MCP-SETUP.md). Esa conexión usa OAuth y permisos separados; no requiere guardar API keys.
