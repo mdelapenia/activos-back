@@ -8,6 +8,7 @@ const ACCESS_SECONDS = 60 * 60;
 const REFRESH_SECONDS = 30 * 24 * 60 * 60;
 const AUTH_REQUEST_SECONDS = 10 * 60;
 const MCP_PROTOCOL = '2025-11-25';
+const MCP_PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 
 const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const json = (res, status, value) => {
@@ -237,10 +238,10 @@ async function revokeToken(db, req) {
 
 function toolList() {
     return [
-        { name: 'get_portfolio', description: 'Consulta tus inversiones y preferencias básicas. Devuelve nombres, tipos, cantidades, monedas, fechas y unidades.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false } },
-        { name: 'add_investment', description: 'Agrega una posición a tu cartera. Requiere permiso de escritura. Para tasas usa kind=rate, rate y period; para otros activos usa coin y units.', inputSchema: investmentSchema(false), annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
-        { name: 'update_investment', description: 'Reemplaza una posición existente por los datos indicados. Requiere permiso de escritura.', inputSchema: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 128 }, investment: investmentSchema(true) }, required: ['id', 'investment'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
-        { name: 'remove_investment', description: 'Elimina una posición de tu cartera por su ID. Requiere permiso de escritura.', inputSchema: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 128 } }, required: ['id'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } },
+        { name: 'get_portfolio', title: 'Consultar cartera', description: 'Consulta tus inversiones y preferencias básicas. Devuelve nombres, tipos, cantidades, monedas, fechas y unidades.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false } },
+        { name: 'add_investment', title: 'Agregar inversión', description: 'Agrega una posición a tu cartera. Requiere permiso de escritura. Para tasas usa kind=rate, rate y period; para otros activos usa coin y units.', inputSchema: investmentSchema(false), annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
+        { name: 'update_investment', title: 'Editar inversión', description: 'Reemplaza una posición existente por los datos indicados. Requiere permiso de escritura.', inputSchema: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 128 }, investment: investmentSchema(true) }, required: ['id', 'investment'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false } },
+        { name: 'remove_investment', title: 'Eliminar inversión', description: 'Elimina una posición de tu cartera por su ID. Requiere permiso de escritura.', inputSchema: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 128 } }, required: ['id'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } },
     ];
 }
 
@@ -341,15 +342,23 @@ async function handleMcp(db, req, res, env, now) {
         message = JSON.parse(raw);
     } catch { return json(res, 400, rpcError(null, -32700, 'Invalid JSON')); }
     if (!message || message.jsonrpc !== '2.0' || typeof message.method !== 'string') return json(res, 400, rpcError(message?.id, -32600, 'Invalid Request'));
+    let protocolVersion;
+    if (message.method === 'initialize') {
+        const offered = message.params?.protocolVersion;
+        protocolVersion = MCP_PROTOCOLS.includes(offered) ? offered : MCP_PROTOCOL;
+    } else {
+        const requested = req.headers['mcp-protocol-version'];
+        if (requested && !MCP_PROTOCOLS.includes(requested)) return json(res, 400, rpcError(message.id, -32600, 'Unsupported MCP protocol version'));
+        protocolVersion = requested || MCP_PROTOCOL;
+    }
+    res.setHeader('MCP-Protocol-Version', protocolVersion);
     if (message.method === 'notifications/initialized' || message.method === 'notifications/cancelled') {
         res.statusCode = 202;
         return res.end();
     }
     let result;
     if (message.method === 'initialize') {
-        const offered = message.params?.protocolVersion;
-        const supported = ['2025-11-25', '2025-06-18', '2025-03-26'];
-        result = { protocolVersion: supported.includes(offered) ? offered : MCP_PROTOCOL, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'activos-mcp', version: '1.0.0' }, instructions: 'Consultá la cartera antes de hacer cambios. La edición requiere autorización portfolio:write y confirmación de la persona usuaria.' };
+        result = { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'activos-mcp', version: '1.0.0' }, instructions: 'Consultá la cartera antes de hacer cambios. La edición requiere autorización portfolio:write y confirmación de la persona usuaria.' };
     } else if (message.method === 'ping') {
         result = {};
     } else if (message.method === 'tools/list') {
