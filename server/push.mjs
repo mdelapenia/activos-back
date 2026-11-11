@@ -343,6 +343,20 @@ export async function loadPriceQuotes(alerts, fetcher = fetch) {
 
         else if (paths[kind]) url = `https://data912.com/live/${paths[kind]}`;
 
+        else if (kind === 'morpho') {
+            // Precio de la participación del vault en USD; el id es `chainId~direccion`.
+            const parsed = unique.filter(id => /^\d{1,9}~0x[0-9a-f]{40}$/.test(id)).map(id => { const [chain, address] = id.split('~'); return { chainId: Number(chain), address }; });
+            if (!parsed.length) return;
+            const query = `{ vaults(first: 1000, where: { address_in: ${JSON.stringify(parsed.map(p => p.address))}, chainId_in: ${JSON.stringify([...new Set(parsed.map(p => p.chainId))])} }) { items { address chain { id } state { sharePriceUsd } } } }`;
+            const response = await fetcher('https://api.morpho.org/graphql', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query }), signal: AbortSignal.timeout(15000) });
+            if (!response.ok) throw new Error('Proveedor de precios no disponible');
+            const body = await response.json();
+            for (const vault of body?.data?.vaults?.items ?? []) {
+                const id = `${Number(vault?.chain?.id)}~${String(vault?.address ?? '').toLowerCase()}`, price = Number(vault?.state?.sharePriceUsd);
+                if (unique.includes(id) && Number.isFinite(price) && price > 0) quotes[`morpho:${id}`] = price;
+            }
+            return;
+        }
         else return;
 
         const response = await fetcher(url, { signal: AbortSignal.timeout(15000) });
