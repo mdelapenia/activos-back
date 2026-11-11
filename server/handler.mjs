@@ -14,6 +14,7 @@ import { pushConfig, saveSubscription, removeSubscription, subscriptionStatus, t
 import { detectWalletNetworks, previewWalletHoldings, walletAddresses, walletHoldings } from './wallets.mjs';
 import { telegramConnect, telegramDisconnect, telegramStatus, telegramTest, telegramWebhook } from './telegram.mjs';
 import { summarySettings } from './scheduled-summary.mjs';
+import { ratesOverview } from './rates.mjs';
 import { handleMcpRequest, listAuthorizations, revokeAuthorization } from './mcp.mjs';
 
 const COOKIE = 'activos_session';
@@ -77,7 +78,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 const db = await database();
                 if (await handleMcpRequest({ db, req, res, env, now: clock() }) !== false) return;
             }
-            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'] }[path];
+            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'], '/api/rates': ['GET'] }[path];
             const telegramMethods = { '/api/telegram': ['GET', 'DELETE'], '/api/telegram/connect': ['POST'], '/api/telegram/test': ['POST'], '/api/telegram/webhook': ['POST'] };
             if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && path !== '/api/wallets/detect' && path !== '/api/wallets/check' && path !== '/api/summaries' && !Object.hasOwn(telegramMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
             const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : path === '/api/wallets/detect' || path === '/api/wallets/check' ? ['POST'] : path === '/api/summaries' ? ['GET', 'PUT'] : telegramMethods[path] || allowed;
@@ -168,6 +169,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 if (!Array.isArray(rows)) throw new HttpError(503, 'Historial del Merval inválido.');
                 return reply(200, rows.flatMap(row => typeof row?.date === 'string' && Number.isFinite(row.close) && row.close > 0 ? [{ fecha: row.date.slice(0, 10), valor: row.close }] : []));
             }
+            if (path === '/api/rates') { try { return reply(200, await ratesOverview(db, now)); } catch { throw new HttpError(503, 'No se pudieron consultar las tasas. Volvé a intentar en un momento.'); } }
             if (path === '/api/inflation/us') return reply(200, await usInflation(now));
             if (path === '/api/session') return reply(200, { user: { id: user._id.toString(), email: user.email }, ...await readPortfolio(db, user._id) });
             if (path === '/api/market-calendar/earnings') {

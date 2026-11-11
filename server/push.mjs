@@ -1,16 +1,16 @@
 import webpush from 'web-push';
 import { sendTelegram } from './telegram.mjs';
 
-async function notificationSubscriptions(db, env) {
+export async function notificationSubscriptions(db, env) {
     const rows = await db.collection('push_subscriptions').find({}).toArray();
     if (!env.TELEGRAM_BOT_TOKEN) return rows;
     const telegram = await db.collection('telegram_subscriptions').find({}).toArray();
     return [...rows, ...telegram.map(row => ({ ...row, _id: `telegram:${row.userId}:${row.chatId}`, channel: 'telegram' }))];
 }
-async function deliverNotification(db, row, payload, env) {
+export async function deliverNotification(db, row, payload, env) {
     return row.channel === 'telegram' ? sendTelegram(db, row, payload, env) : sendPush(db, row, payload, env);
 }
-const receives = (alert, row) => !alert.channels || alert.channels === 'both' || alert.channels === (row.channel === 'telegram' ? 'telegram' : 'push');
+export const receives = (alert, row) => !alert.channels || alert.channels === 'both' || alert.channels === (row.channel === 'telegram' ? 'telegram' : 'push');
 
 import { createHash } from 'node:crypto';
 

@@ -3,6 +3,7 @@ import handler from './server/handler.mjs';
 import { closeDatabase, getDatabase } from './server/database.mjs';
 import { checkDividendPush, checkPricePush } from './server/push.mjs';
 import { checkScheduledSummaries } from './server/scheduled-summary.mjs';
+import { checkRatePush } from './server/rates.mjs';
 import { loadAtlasEnvironment } from './server/environment.mjs';
 
 loadAtlasEnvironment();
@@ -18,7 +19,7 @@ let checkingPush = false;
 async function checkPush() {
     if (checkingPush) return;
     checkingPush = true;
-    try { const db = await getDatabase(); for (const check of [checkPricePush, checkDividendPush, checkScheduledSummaries]) { try { await check(db, process.env); } catch (error) { console.error('No se pudo revisar un tipo de notificación:', error.message); } } }
+    try { const db = await getDatabase(); for (const check of [checkPricePush, checkDividendPush, checkScheduledSummaries, checkRatePush]) { try { await check(db, process.env); } catch (error) { console.error('No se pudo revisar un tipo de notificación:', error.message); } } }
     catch (error) { console.error('No se pudieron revisar las notificaciones:', error.message); }
     finally { checkingPush = false; }
 }
