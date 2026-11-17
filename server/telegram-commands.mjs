@@ -5,7 +5,7 @@ import { stockQuotes } from './stock-quotes.mjs';
 import { walletAddresses, walletHoldings } from './wallets.mjs';
 
 const aliases = { btc: 'bitcoin', eth: 'ethereum', sol: 'solana', usdc: 'usd-coin', usdt: 'tether', bnb: 'binancecoin' };
-const names = { crypto: 'Cripto', stock: 'Acciones', cedear: 'CEDEARs', 'arg-stock': 'Acciones argentinas', bond: 'Bonos', fund: 'Fondos', morpho: 'Morpho', rate: 'Con tasa' };
+const names = { crypto: 'Cripto', stock: 'Acciones', cedear: 'CEDEARs', 'arg-stock': 'Acciones argentinas', bond: 'Bonos', lecap: 'Letras (LECAP)', fund: 'Fondos', morpho: 'Morpho', rate: 'Con tasa' };
 const money = (amount, currency) => Number.isFinite(amount) ? new Intl.NumberFormat('es-AR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount) : 'No disponible';
 const number = value => Number.isFinite(value) ? new Intl.NumberFormat('es-AR', { maximumSignificantDigits: 10 }).format(value) : 'No disponible';
 const today = now => new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
@@ -35,7 +35,7 @@ function rateValue(item, now) {
     const monthly = item.period === 'month' ? rate : Math.pow(1 + rate, 1 / 12) - 1;
     return item.amount * Math.pow(1 + monthly, (now - start) / (365.25 / 12 * 86400000));
 }
-const quoteCurrency = item => ['cedear', 'arg-stock', 'bond', 'fund'].includes(item.kind) ? 'ARS' : 'USD';
+const quoteCurrency = item => ['cedear', 'arg-stock', 'bond', 'lecap', 'fund'].includes(item.kind) ? 'ARS' : 'USD';
 export function convert(value, from, to, fx) { return !Number.isFinite(value) ? NaN : from === to ? value : !fx ? NaN : from === 'USD' ? value * fx.value : value / fx.value; }
 function position(item, quotes, fx, now) {
     const currency = quoteCurrency(item), quote = quotes[`${item.kind}:${item.coin}`];

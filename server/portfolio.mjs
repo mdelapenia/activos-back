@@ -2,7 +2,7 @@ import { HttpError } from './security.mjs';
 
 export const emptyPortfolio = () => ({
     investments: [],
-    preferences: { theme: 'dark', dollar: 'bolsa', hidden: false, sidebarCollapsed: false, display: 'USD', horizon: 12 },
+    preferences: { theme: 'dark', dollar: 'bolsa', hidden: false, sidebarCollapsed: false, display: 'USD', horizon: 12, decimals: 2 },
 });
 
 const positive = n => typeof n === 'number' && Number.isFinite(n) && n > 0;
@@ -16,8 +16,8 @@ export function validatePortfolio(raw) {
         if (!i || !text(i.id, 128) || ids.has(i.id) || !text(i.name, 70) || !(positive(i.amount) || (i.kind === 'crypto' && i.costUnknown === true && i.amount === 0))) return invalid();
         if (i.costUnknown !== undefined && (i.costUnknown !== true || i.kind !== 'crypto' || i.amount !== 0)) return invalid();
         ids.add(i.id);
-        if (!['USD', 'ARS'].includes(i.currency) || !['rate', 'cedear', 'crypto', 'stock', 'arg-stock', 'bond', 'fund', 'morpho'].includes(i.kind)) return invalid();
-        if ((i.kind === 'stock' && i.currency !== 'USD') || (['arg-stock', 'bond', 'fund'].includes(i.kind) && i.currency !== 'ARS')) return invalid();
+        if (!['USD', 'ARS'].includes(i.currency) || !['rate', 'cedear', 'crypto', 'stock', 'arg-stock', 'bond', 'lecap', 'fund', 'morpho'].includes(i.kind)) return invalid();
+        if ((i.kind === 'stock' && i.currency !== 'USD') || (['arg-stock', 'bond', 'lecap', 'fund'].includes(i.kind) && i.currency !== 'ARS')) return invalid();
         if (typeof i.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(i.date)) return invalid();
         const date = new Date(`${i.date}T12:00:00Z`);
         if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== i.date) return invalid();
@@ -56,7 +56,7 @@ export function validatePortfolio(raw) {
     if (!Array.isArray(alerts) || alerts.length > 200) return invalid();
     const alertIds = new Set();
     for (const a of alerts) {
-        if (!a || !text(a.id, 128) || alertIds.has(a.id) || !['price', 'variation', 'concentration', 'dividend', 'maturity'].includes(a.kind) || !['cedear', 'stock', 'crypto', 'arg-stock', 'bond', 'fund'].includes(a.assetKind) || !text(a.assetId, 150) || !text(a.assetName, 150) || !['above', 'below'].includes(a.direction) || typeof a.threshold !== 'number' || !Number.isFinite(a.threshold) || a.threshold < 0 || a.threshold > 1e15 || typeof a.date !== 'string') return invalid();
+        if (!a || !text(a.id, 128) || alertIds.has(a.id) || !['price', 'variation', 'concentration', 'dividend', 'maturity'].includes(a.kind) || !['cedear', 'stock', 'crypto', 'arg-stock', 'bond', 'lecap', 'fund'].includes(a.assetKind) || !text(a.assetId, 150) || !text(a.assetName, 150) || !['above', 'below'].includes(a.direction) || typeof a.threshold !== 'number' || !Number.isFinite(a.threshold) || a.threshold < 0 || a.threshold > 1e15 || typeof a.date !== 'string') return invalid();
         if (['dividend', 'maturity'].includes(a.kind) ? !Number.isInteger(a.threshold) : a.threshold === 0) return invalid();
         if (a.kind === 'concentration' && a.threshold > 100) return invalid();
         if (a.channels !== undefined && !['push', 'telegram', 'both'].includes(a.channels)) return invalid();
@@ -68,23 +68,23 @@ export function validatePortfolio(raw) {
     if (!p || !['dark', 'light', 'system'].includes(p.theme) || !['USD', 'ARS'].includes(p.display)
         || !['bolsa', 'contadoconliqui', 'blue', 'oficial', 'mayorista', 'cripto', 'tarjeta'].includes(p.dollar)
         || typeof p.hidden !== 'boolean' || typeof p.sidebarCollapsed !== 'boolean' || ![0, 12, 36, 60].includes(p.horizon)) return invalid();
-    if ((p.showChatButton !== undefined && typeof p.showChatButton !== 'boolean') || (p.showQuotesBar !== undefined && typeof p.showQuotesBar !== 'boolean')) return invalid();
+    if ((p.decimals !== undefined && ![0, 2, 4, 6].includes(p.decimals)) || (p.showChatButton !== undefined && typeof p.showChatButton !== 'boolean') || (p.showQuotesBar !== undefined && typeof p.showQuotesBar !== 'boolean')) return invalid();
     if (p.quietHours !== undefined && (!p.quietHours || typeof p.quietHours !== 'object' || typeof p.quietHours.enabled !== 'boolean' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(p.quietHours.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(p.quietHours.end) || (p.quietHours.enabled && p.quietHours.start === p.quietHours.end))) return invalid();
     if (p.rateAlerts !== undefined && (!p.rateAlerts || typeof p.rateAlerts !== 'object' || typeof p.rateAlerts.enabled !== 'boolean' || !['push', 'telegram', 'both'].includes(p.rateAlerts.channels))) return invalid();
     let allocationTargets;
     if (p.allocationTargets !== undefined) {
         const keys = ['rate', 'cedear', 'index', 'stock', 'crypto'];
-        const optionalKeys = ['arg-stock', 'bond', 'fund', 'morpho'];
+        const optionalKeys = ['arg-stock', 'bond', 'lecap', 'fund', 'morpho'];
         const targets = p.allocationTargets;
         if (!targets || typeof targets !== 'object' || Array.isArray(targets) || Object.keys(targets).some(key => ![...keys, ...optionalKeys].includes(key)) || keys.some(key => !(key in targets)) || [...keys, ...optionalKeys].some(key => targets[key] !== undefined && (typeof targets[key] !== 'number' || !Number.isFinite(targets[key]) || targets[key] < 0 || targets[key] > 100))) return invalid();
-        const withoutMorpho = [...keys, 'arg-stock', 'bond', 'fund'].reduce((sum, key) => sum + (targets[key] ?? 0), 0);
+        const withoutMorpho = [...keys, 'arg-stock', 'bond', 'lecap', 'fund'].reduce((sum, key) => sum + (targets[key] ?? 0), 0);
         const hasMorpho = Object.prototype.hasOwnProperty.call(targets, 'morpho');
         const morpho = hasMorpho ? targets.morpho : Math.max(0, 100 - withoutMorpho);
         if ((!hasMorpho && withoutMorpho > 100.000001) || Math.abs(withoutMorpho + (morpho ?? 0) - 100) > 0.000001) return invalid();
-        allocationTargets = { rate: targets.rate, cedear: targets.cedear, index: targets.index, stock: targets.stock, crypto: targets.crypto, ...(targets['arg-stock'] === undefined ? {} : { 'arg-stock': targets['arg-stock'] }), ...(targets.bond === undefined ? {} : { bond: targets.bond }), ...(targets.fund === undefined ? {} : { fund: targets.fund }), ...(!hasMorpho && morpho === 0 ? {} : { morpho }) };
+        allocationTargets = { rate: targets.rate, cedear: targets.cedear, index: targets.index, stock: targets.stock, crypto: targets.crypto, ...(targets['arg-stock'] === undefined ? {} : { 'arg-stock': targets['arg-stock'] }), ...(targets.bond === undefined ? {} : { bond: targets.bond }), ...(targets.lecap === undefined ? {} : { lecap: targets.lecap }), ...(targets.fund === undefined ? {} : { fund: targets.fund }), ...(!hasMorpho && morpho === 0 ? {} : { morpho }) };
     }
     if (p.panels !== undefined && (!Array.isArray(p.panels) || p.panels.some(x => !['value', 'evolution', 'distribution', 'investments', 'inflation', 'macro', 'streak', 'panel-v2'].includes(x)))) return invalid();
-    return { investments, ...(raw.alerts === undefined ? {} : { alerts: alerts.map(({ id, kind, assetKind, assetId, assetName, threshold, direction, date, channels }) => ({ id, kind, assetKind, assetId, assetName, threshold, direction, date, ...(channels === undefined ? {} : { channels }) })) }), ...(raw.imports === undefined ? {} : { imports: imports.map(op => ({ id: op.id, status: op.status, ...Object.fromEntries(importFields.map(field => [field, op[field]])) })) }), ...(raw.sales === undefined ? {} : { sales: sales.map(({ id, name, date, fraction, proceeds, currency, cost, costCurrency, executionPrice, units, fee }) => ({ id, name, date, fraction, proceeds, currency, cost, costCurrency, ...(executionPrice == null ? {} : { executionPrice }), ...(units == null ? {} : { units }), ...(fee == null ? {} : { fee }) })) }), preferences: { ...(allocationTargets === undefined ? {} : { allocationTargets }), theme: p.theme, display: p.display, dollar: p.dollar, hidden: p.hidden, sidebarCollapsed: p.sidebarCollapsed, horizon: p.horizon, ...(p.panels === undefined ? {} : { panels: p.panels }), ...(p.showChatButton === undefined ? {} : { showChatButton: p.showChatButton }), ...(p.showQuotesBar === undefined ? {} : { showQuotesBar: p.showQuotesBar }), ...(p.quietHours === undefined ? {} : { quietHours: { enabled: p.quietHours.enabled, start: p.quietHours.start, end: p.quietHours.end } }), ...(p.rateAlerts === undefined ? {} : { rateAlerts: { enabled: p.rateAlerts.enabled, channels: p.rateAlerts.channels } }) } };
+    return { investments, ...(raw.alerts === undefined ? {} : { alerts: alerts.map(({ id, kind, assetKind, assetId, assetName, threshold, direction, date, channels }) => ({ id, kind, assetKind, assetId, assetName, threshold, direction, date, ...(channels === undefined ? {} : { channels }) })) }), ...(raw.imports === undefined ? {} : { imports: imports.map(op => ({ id: op.id, status: op.status, ...Object.fromEntries(importFields.map(field => [field, op[field]])) })) }), ...(raw.sales === undefined ? {} : { sales: sales.map(({ id, name, date, fraction, proceeds, currency, cost, costCurrency, executionPrice, units, fee }) => ({ id, name, date, fraction, proceeds, currency, cost, costCurrency, ...(executionPrice == null ? {} : { executionPrice }), ...(units == null ? {} : { units }), ...(fee == null ? {} : { fee }) })) }), preferences: { ...(allocationTargets === undefined ? {} : { allocationTargets }), theme: p.theme, display: p.display, dollar: p.dollar, hidden: p.hidden, sidebarCollapsed: p.sidebarCollapsed, horizon: p.horizon, decimals: p.decimals ?? 2, ...(p.panels === undefined ? {} : { panels: p.panels }), ...(p.showChatButton === undefined ? {} : { showChatButton: p.showChatButton }), ...(p.showQuotesBar === undefined ? {} : { showQuotesBar: p.showQuotesBar }), ...(p.quietHours === undefined ? {} : { quietHours: { enabled: p.quietHours.enabled, start: p.quietHours.start, end: p.quietHours.end } }), ...(p.rateAlerts === undefined ? {} : { rateAlerts: { enabled: p.rateAlerts.enabled, channels: p.rateAlerts.channels } }) } };
 }
 
 export async function readPortfolio(db, userId) {

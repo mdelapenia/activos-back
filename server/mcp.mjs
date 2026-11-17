@@ -315,7 +315,7 @@ function investmentSchema(includeId) {
     const properties = {
         name: { type: 'string', minLength: 1, maxLength: 70 }, amount: { type: 'number', exclusiveMinimum: 0 },
         currency: { type: 'string', enum: ['USD', 'ARS'] }, date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
-        kind: { type: 'string', enum: ['rate', 'cedear', 'crypto', 'stock', 'arg-stock', 'bond', 'fund', 'morpho'] },
+        kind: { type: 'string', enum: ['rate', 'cedear', 'crypto', 'stock', 'arg-stock', 'bond', 'lecap', 'fund', 'morpho'] },
         rate: { type: 'number' }, period: { type: 'string', enum: ['month', 'year'] }, coin: { type: 'string', minLength: 1, maxLength: 150 },
         units: { type: 'number', exclusiveMinimum: 0 }, purchasePrice: { type: 'number', exclusiveMinimum: 0 },
         purchaseFx: { type: 'number', exclusiveMinimum: 0 }, maturityDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },

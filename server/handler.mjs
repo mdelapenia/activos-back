@@ -11,12 +11,14 @@ import { portfolioDividends, marketDividends } from './dividends.mjs';
 import { earningsCalendar } from './market-calendar.mjs';
 import { stockQuotes, stockHistory } from './stock-quotes.mjs';
 import { worldClimate } from './world.mjs';
-import { pushConfig, saveSubscription, removeSubscription, subscriptionStatus, testPush, alertTestPayload } from './push.mjs';
+import { pushConfig, saveSubscription, removeSubscription, subscriptionStatus, testPush, alertTestPayload, saveExpoToken, removeExpoToken, expoTokenStatus, testExpoPush } from './push.mjs';
 import { detectWalletNetworks, previewWalletHoldings, walletAddresses, walletHoldings } from './wallets.mjs';
 import { telegramConnect, telegramDisconnect, telegramStatus, telegramTest, telegramWebhook } from './telegram.mjs';
 import { summarySettings } from './scheduled-summary.mjs';
 import { ratesOverview } from './rates.mjs';
 import { handleMcpRequest, listAuthorizations, revokeAuthorization } from './mcp.mjs';
+import { deleteAccount } from './account-deletion.mjs';
+import { checkPin } from './pin-guard.mjs';
 
 const COOKIE = 'activos_session';
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
@@ -79,7 +81,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 const db = await database();
                 if (await handleMcpRequest({ db, req, res, env, now: clock() }) !== false) return;
             }
-            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/world': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'], '/api/rates': ['GET'] }[path];
+            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/push/native/subscribe': ['POST'], '/api/push/native/unsubscribe': ['POST'], '/api/push/native/status': ['POST'], '/api/push/native/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/world': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/pin': ['POST'], '/api/pin/verify': ['POST'], '/api/account/delete': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'], '/api/rates': ['GET'] }[path];
             const telegramMethods = { '/api/telegram': ['GET', 'DELETE'], '/api/telegram/connect': ['POST'], '/api/telegram/test': ['POST'], '/api/telegram/webhook': ['POST'] };
             if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && path !== '/api/wallets/detect' && path !== '/api/wallets/check' && path !== '/api/summaries' && !Object.hasOwn(telegramMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
             const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : path === '/api/wallets/detect' || path === '/api/wallets/check' ? ['POST'] : path === '/api/summaries' ? ['GET', 'PUT'] : telegramMethods[path] || allowed;
@@ -119,6 +121,29 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 if (!valid || !user || user.disabled) throw new HttpError(401, 'Correo o PIN incorrectos.', 'INVALID_CREDENTIALS');
                 return reply(200, await startSession(db, req, res, user, now, production));
             }
+            if (path === '/api/pin') {
+                const user = await requireUser(db, req, now);
+                const body = await jsonBody(req);
+                if (!validPin(body?.currentPin) || !validPin(body?.newPin)) throw new HttpError(400, 'El PIN debe tener 6 dígitos.');
+                if (body.newPin !== body.confirmPin) throw new HttpError(400, 'Los PINs nuevos no coinciden.');
+                await checkPin(db, user, body.currentPin, now, { field: 'el PIN actual' });
+                await db.collection('users').updateOne({ _id: user._id }, { $set: { pinHash: await hashPin(body.newPin) } });
+                const currentToken = cookieToken(req);
+                if (currentToken) await db.collection('sessions').deleteMany({ userId: user._id, _id: { $ne: digest(currentToken) } });
+                return reply(200, { ok: true });
+            }
+            // Comprueba el PIN sin cambiar nada (p. ej. antes de pedir el PIN nuevo). Con límite de intentos.
+            if (path === '/api/pin/verify') {
+                const user = await requireUser(db, req, now);
+                await checkPin(db, user, (await jsonBody(req))?.pin, now, { field: 'el PIN actual' });
+                return reply(200, { ok: true });
+            }
+            if (path === '/api/account/delete') {
+                const user = await requireUser(db, req, now);
+                await deleteAccount(db, user, await jsonBody(req), env);
+                setCookie(res, '', production);
+                return reply(200, { ok: true });
+            }
             if (path === '/api/logout') {
                 const token = cookieToken(req);
                 if (token) await db.collection('sessions').deleteOne({ _id: digest(token) });
@@ -143,6 +168,11 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             if (path === '/api/push/unsubscribe') { await removeSubscription(db, user, (await jsonBody(req)).endpoint); return reply(200, { ok: true }); }
             if (path === '/api/push/status') return reply(200, { enabled: await subscriptionStatus(db, user, (await jsonBody(req)).endpoint) });
             if (path === '/api/push/test') { const body = await jsonBody(req); await testPush(db, user, body.endpoint, env, body.alertId); return reply(200, { ok: true }); }
+            // App nativa: token de Expo en lugar de suscripción Web Push.
+            if (path === '/api/push/native/subscribe') { await saveExpoToken(db, user, await jsonBody(req)); return reply(200, { ok: true }); }
+            if (path === '/api/push/native/unsubscribe') { await removeExpoToken(db, user, (await jsonBody(req))?.token); return reply(200, { ok: true }); }
+            if (path === '/api/push/native/status') return reply(200, { enabled: await expoTokenStatus(db, user, (await jsonBody(req))?.token) });
+            if (path === '/api/push/native/test') { await testExpoPush(db, user, (await jsonBody(req))?.token, env); return reply(200, { ok: true }); }
             if (path === '/api/stocks/history') return reply(200, await stockHistory((new URL(req.url, 'http://localhost').searchParams.get('symbol') || '').toUpperCase()));
             if (path === '/api/world') { try { return reply(200, await worldClimate(now)); } catch { throw new HttpError(503, 'No se pudo consultar el clima de mercado. Volvé a intentar en un momento.'); } }
             if (path === '/api/stocks/quotes') return reply(200, await stockQuotes((new URL(req.url, 'http://localhost').searchParams.get('symbols') || '').split(',')));

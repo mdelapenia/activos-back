@@ -1,8 +1,10 @@
 import webpush from 'web-push';
 import { sendTelegram } from './telegram.mjs';
 
-export async function notificationSubscriptions(db, env) {
-    const rows = await db.collection('push_subscriptions').find({}).toArray();
+// `native: true` incluye los iPhone con la app (tokens de Expo). Por ahora la app recibe solo
+// el resumen programado y el radar de tasas; las alertas de precio y dividendos siguen en web y Telegram.
+export async function notificationSubscriptions(db, env, { native = false } = {}) {
+    const rows = await db.collection('push_subscriptions').find(native ? {} : { channel: { $ne: 'expo' } }).toArray();
     if (!env.TELEGRAM_BOT_TOKEN) return rows;
     const telegram = await db.collection('telegram_subscriptions').find({}).toArray();
     return [...rows, ...telegram.map(row => ({ ...row, _id: `telegram:${row.userId}:${row.chatId}`, channel: 'telegram' }))];
@@ -128,7 +130,58 @@ export function isQuietHours(settings, now = Date.now()) {
 
 }
 
-export async function sendPush(db, row, payload, env) {
+// --- App nativa (Expo Push Service → APNs) ---
+
+const EXPO_TOKEN = /^Expo(nent)?PushToken\[[A-Za-z0-9_-]{10,200}\]$/;
+const expoId = token => digest(`expo:${token}`);
+function validExpoToken(token) {
+    if (typeof token !== 'string' || !EXPO_TOKEN.test(token)) throw new HttpError(400, 'El identificador de notificaciones del dispositivo no es válido.');
+    return token;
+}
+
+export async function saveExpoToken(db, user, body) {
+    const token = validExpoToken(body?.token);
+    const device = typeof body?.device === 'string' ? body.device.slice(0, 80) : '';
+    await db.collection('push_subscriptions').updateOne({ _id: expoId(token) }, { $set: { userId: user._id, channel: 'expo', token, device, updatedAt: new Date() } }, { upsert: true });
+}
+
+export async function removeExpoToken(db, user, token) {
+    await db.collection('push_subscriptions').deleteOne({ _id: expoId(validExpoToken(token)), userId: user._id });
+}
+
+export async function expoTokenStatus(db, user, token) {
+    if (typeof token !== 'string' || !EXPO_TOKEN.test(token)) return false;
+    return !!(await db.collection('push_subscriptions').findOne({ _id: expoId(token), userId: user._id }));
+}
+
+export async function testExpoPush(db, user, token, env, deliver = sendPush) {
+    const row = await db.collection('push_subscriptions').findOne({ _id: expoId(validExpoToken(token)), userId: user._id });
+    if (!row) throw new HttpError(404, 'Activá las notificaciones en este iPhone primero.');
+    const payload = { title: '🔔 Prueba de Alza', body: 'Las notificaciones de este iPhone funcionan. Acá vas a recibir el resumen y el radar de tasas.', url: '/' };
+    if (!await deliver(db, row, payload, env)) throw new HttpError(410, 'El iPhone ya no acepta notificaciones. Activalas otra vez.');
+}
+
+async function sendExpo(db, row, payload, env, fetcher = fetch) {
+    const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+    if (env.EXPO_ACCESS_TOKEN) headers.Authorization = `Bearer ${env.EXPO_ACCESS_TOKEN}`;
+    const response = await fetcher('https://exp.host/--/api/v2/push/send', {
+        method: 'POST', headers, signal: AbortSignal.timeout(15_000),
+        body: JSON.stringify([{ to: row.token, title: payload.title, body: payload.body, data: { url: payload.url ?? '/' }, sound: 'default', priority: 'high', ttl: 86400 }]),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(`Expo Push respondió ${response.status}.`);
+    const ticket = Array.isArray(result?.data) ? result.data[0] : result?.data;
+    if (ticket?.status === 'error') {
+        // El iPhone desinstaló la app o revocó el permiso: se borra para no reintentar.
+        if (ticket.details?.error === 'DeviceNotRegistered') { await db.collection('push_subscriptions').deleteOne({ _id: row._id }); return false; }
+        throw new Error(ticket.message || 'Expo Push rechazó la notificación.');
+    }
+    return true;
+}
+
+export async function sendPush(db, row, payload, env, fetcher) {
+
+    if (row.channel === 'expo') return sendExpo(db, row, payload, env, fetcher);
 
     const config = await pushConfig(db, env);
 
@@ -140,7 +193,7 @@ export async function sendPush(db, row, payload, env) {
 
 // Las pruebas y las notificaciones reales comparten estos formatos.
 function pricePushPayload(alert, price, test = false) {
-    const currency = ['cedear', 'arg-stock', 'bond', 'fund'].includes(alert.assetKind) ? 'ARS' : 'USD';
+    const currency = ['cedear', 'arg-stock', 'bond', 'lecap', 'fund'].includes(alert.assetKind) ? 'ARS' : 'USD';
     const format = value => new Intl.NumberFormat('es-AR', {
         style: 'currency', currency, maximumFractionDigits: 4
     }).format(value);
@@ -333,7 +386,7 @@ export async function loadPriceQuotes(alerts, fetcher = fetch) {
 
         const unique = [...new Set(ids)];
 
-        const paths = { cedear: 'arg_cedears', stock: 'usa_stocks', 'arg-stock': 'arg_stocks', bond: 'arg_bonds' };
+        const paths = { cedear: 'arg_cedears', stock: 'usa_stocks', 'arg-stock': 'arg_stocks', bond: 'arg_bonds', lecap: 'arg_notes' };
 
         let url;
 
@@ -385,7 +438,8 @@ export async function loadPriceQuotes(alerts, fetcher = fetch) {
 
                 price = Number(row?.c);
 
-                if (kind === 'bond') price /= 100;
+                // Bonos y letras (LECAP) cotizan cada 100 de valor nominal.
+                if (kind === 'bond' || kind === 'lecap') price /= 100;
 
             }
 

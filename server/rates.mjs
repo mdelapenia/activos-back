@@ -164,7 +164,7 @@ export async function checkRatePush(db, env, now = Date.now(), { load = fetchRat
     if (!spikes.length) return;
     const spike = spikes[0], payload = ratePushPayload(spike, rateOptions(buckets, plazosFijos));
     const users = new Map();
-    for (const row of await notificationSubscriptions(db, env)) { const key = String(row.userId); if (!users.has(key)) users.set(key, []); users.get(key).push(row); }
+    for (const row of await notificationSubscriptions(db, env, { native: true })) { const key = String(row.userId); if (!users.has(key)) users.set(key, []); users.get(key).push(row); }
     const deliveries = db.collection('push_deliveries');
     for (const rows of users.values()) {
         try {
