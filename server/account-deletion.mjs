@@ -16,6 +16,7 @@ export const USER_DATA = [
     ['beta_signups', '_id'],
     ['beta_feedback', 'userId'],
     ['scheduled_summaries', '_id'],
+    ['market_saved', '_id'],
     ['summary_snapshots', 'userId'],
     ['push_subscriptions', 'userId'],
     ['telegram_subscriptions', '_id'],

@@ -20,6 +20,7 @@ import { ratesOverview } from './rates.mjs';
 import { handleMcpRequest, listAuthorizations, revokeAuthorization } from './mcp.mjs';
 import { deleteAccount } from './account-deletion.mjs';
 import { checkPin } from './pin-guard.mjs';
+import { marketSaved } from './market-saved.mjs';
 import { confirmMfaSetup, disableMfa, mfaDetails, mfaStatus, regenerateLegacyRecovery, startMfaSetup } from './mfa.mjs';
 import { notifyNewLogin } from './security-notices.mjs';
 import { updateDeviceLocation } from './device-location.mjs';
@@ -109,8 +110,9 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 const db = await database();
                 if (await handleMcpRequest({ db, req, res, env, now: clock() }) !== false) return;
             }
-            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/push/native/subscribe': ['POST'], '/api/push/native/unsubscribe': ['POST'], '/api/push/native/status': ['POST'], '/api/push/native/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/world': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/password/recover': ['POST'], '/api/password/recovery-code': ['POST'], '/api/unlock': ['POST'], '/api/account/setup': ['POST'], '/api/password': ['POST'], '/api/devices': ['GET', 'DELETE'], '/api/devices/current': ['PUT'], '/api/pin': ['POST'], '/api/pin/verify': ['POST'], '/api/account/delete': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/dividends/asset': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'], '/api/rates': ['GET'] }[path];
+            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/push/native/subscribe': ['POST'], '/api/push/native/unsubscribe': ['POST'], '/api/push/native/status': ['POST'], '/api/push/native/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/world': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/password/recover': ['POST'], '/api/password/recovery-code': ['POST'], '/api/unlock': ['POST'], '/api/account/setup': ['POST'], '/api/password': ['POST'], '/api/devices': ['GET', 'DELETE'], '/api/devices/current': ['PUT'], '/api/pin': ['POST'], '/api/pin/verify': ['POST'], '/api/account/delete': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'], '/api/rates': ['GET'], '/api/market/saved': ['GET', 'PUT'] }[path];
             const betaMethods = { '/api/beta/signup': ['POST'], '/api/beta/feedback': ['POST'] };
+
             const telegramMethods = { '/api/telegram': ['GET', 'DELETE'], '/api/telegram/connect': ['POST'], '/api/telegram/test': ['POST'], '/api/telegram/webhook': ['POST'] };
             const mfaMethods = { '/api/mfa': ['GET', 'DELETE'], '/api/mfa/setup': ['POST'], '/api/mfa/confirm': ['POST'], '/api/mfa/details': ['POST'], '/api/mfa/recovery/regenerate': ['POST'] };
             if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && path !== '/api/wallets/detect' && path !== '/api/wallets/check' && path !== '/api/summaries' && !Object.hasOwn(telegramMethods, path) && !Object.hasOwn(mfaMethods, path) && !Object.hasOwn(betaMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
@@ -209,6 +211,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 if (method === 'GET') return reply(200, { authorizations: await listAuthorizations(db, user) });
                 return reply(200, await revokeAuthorization(db, user, (await jsonBody(req))?.id));
             }
+            if (path === '/api/market/saved') return reply(200, await marketSaved(db, user, method === 'GET' ? null : await jsonBody(req), now));
             if (path === '/api/summaries') return reply(200, await summarySettings(db, user, method === 'GET' ? null : await jsonBody(req), now));
             if (path === '/api/telegram') return reply(200, method === 'GET' ? await telegramStatus(db, user, env) : await telegramDisconnect(db, user));
             if (path === '/api/telegram/connect') return reply(200, await telegramConnect(db, user, env, now));
@@ -274,7 +277,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             if (method === 'GET') return reply(200, await readPortfolio(db, user._id));
             return reply(200, await writePortfolio(db, user._id, await jsonBody(req)));
             } catch (error) {
-                if (error instanceof HttpError) return reply(error.status, { error: error.message, code: error.code, ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}) });
+                if (error instanceof HttpError) return reply(error.status, { error: error.message, code: error.code, ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}), ...(Number.isInteger(error.attemptsLeft) ? { attemptsLeft: error.attemptsLeft } : {}) });
                 // No registrar cuerpos, cookies, PINs ni errores del driver que puedan incluir credenciales.
                 return reply(503, { error: 'No se pudo completar la operación. Volvé a intentar.', code: 'UNAVAILABLE' });
             }

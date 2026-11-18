@@ -154,8 +154,18 @@ test('rechaza CSRF, tipos inválidos, fechas imposibles, IDs duplicados y cuerpo
 test('permite reintentar el acceso y rechaza sesiones vencidas aunque Mongo aún no las haya eliminado', async () => {
     for (let i = 0; i < 4; i++) assert.equal((await call('login', { method: 'POST', body: { email: 'limit@example.test', password: 'contraseña equivocada' } })).status, 401);
     assert.equal((await login('limit@example.test')).status, 200, 'un acierto antes del quinto error limpia el contador');
-    for (let i = 0; i < 5; i++) assert.equal((await call('login', { method: 'POST', body: { email: 'limit@example.test', password: 'contraseña equivocada' } })).status, 401);
-    assert.equal((await login('limit@example.test')).status, 429, 'tras 5 errores la cuenta espera 15 minutos aunque la contraseña sea correcta');
+    for (let i = 0; i < 4; i++) {
+        const failed = await call('login', { method: 'POST', body: { email: 'limit@example.test', password: 'contraseña equivocada' } });
+        assert.equal(failed.status, 401);
+        assert.equal(failed.body.attemptsLeft, 4 - i, 'avisa cuántos intentos quedan');
+    }
+    const fifth = await call('login', { method: 'POST', body: { email: 'limit@example.test', password: 'contraseña equivocada' } });
+    assert.equal(fifth.status, 429, 'el quinto error ya bloquea');
+    assert.ok(fifth.body.retryAfter > 890 && fifth.body.retryAfter <= 900, 'informa los segundos que faltan');
+    const locked = await login('limit@example.test');
+    assert.equal(locked.status, 429, 'tras 5 errores la cuenta espera 15 minutos aunque la contraseña sea correcta');
+    assert.equal(locked.body.code, 'TOO_MANY_ATTEMPTS');
+    assert.ok(locked.body.retryAfter > 0);
     assert.equal((await call('login', { method: 'POST', body: { email: 'limit@example.test', pin, legacy: true } })).status, 429);
     const auth = await login('expiry@example.test');
     const cookie = auth.cookie.split(';')[0];
