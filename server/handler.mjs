@@ -21,10 +21,13 @@ import { handleMcpRequest, listAuthorizations, revokeAuthorization } from './mcp
 import { deleteAccount } from './account-deletion.mjs';
 import { checkPin } from './pin-guard.mjs';
 import { marketSaved } from './market-saved.mjs';
-import { confirmMfaSetup, disableMfa, mfaDetails, mfaStatus, regenerateLegacyRecovery, startMfaSetup } from './mfa.mjs';
+import { confirmMfaSetup, disableMfa, mfaDetails, mfaStatus, regenerateLegacyRecovery, startMfaSetup, verifyMfa } from './mfa.mjs';
 import { notifyNewLogin } from './security-notices.mjs';
 import { updateDeviceLocation } from './device-location.mjs';
 import { saveBetaFeedback, saveBetaSignup } from './beta.mjs';
+import { cancelOrder, listOrders, placeOrder, previewOrder, tradeOptions } from './trading.mjs';
+import { orderNotifier } from './trading-alerts.mjs';
+import { connectIol, disconnectIol, iolHistory, iolPortfolio, iolQuotes, iolStatus, saveIdleAlert } from './iol.mjs';
 
 const COOKIE = 'activos_session';
 const BROWSER_COOKIE = 'activos_browser';
@@ -114,9 +117,10 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             const betaMethods = { '/api/beta/signup': ['POST'], '/api/beta/feedback': ['POST'] };
 
             const telegramMethods = { '/api/telegram': ['GET', 'DELETE'], '/api/telegram/connect': ['POST'], '/api/telegram/test': ['POST'], '/api/telegram/webhook': ['POST'] };
+            const iolMethods = { '/api/iol': ['GET', 'DELETE'], '/api/iol/connect': ['POST'], '/api/iol/portfolio': ['GET'], '/api/iol/quotes': ['GET'], '/api/iol/history': ['GET'], '/api/iol/alert': ['PUT'], '/api/iol/orders': ['GET', 'POST', 'DELETE'], '/api/iol/orders/preview': ['POST'], '/api/iol/trade-options': ['GET'] };
             const mfaMethods = { '/api/mfa': ['GET', 'DELETE'], '/api/mfa/setup': ['POST'], '/api/mfa/confirm': ['POST'], '/api/mfa/details': ['POST'], '/api/mfa/recovery/regenerate': ['POST'] };
-            if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && path !== '/api/wallets/detect' && path !== '/api/wallets/check' && path !== '/api/summaries' && !Object.hasOwn(telegramMethods, path) && !Object.hasOwn(mfaMethods, path) && !Object.hasOwn(betaMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
-            const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : path === '/api/wallets/detect' || path === '/api/wallets/check' ? ['POST'] : path === '/api/summaries' ? ['GET', 'PUT'] : telegramMethods[path] || mfaMethods[path] || betaMethods[path] || allowed;
+            if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && path !== '/api/wallets/detect' && path !== '/api/wallets/check' && path !== '/api/summaries' && !Object.hasOwn(telegramMethods, path) && !Object.hasOwn(mfaMethods, path) && !Object.hasOwn(betaMethods, path) && !Object.hasOwn(iolMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
+            const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : path === '/api/wallets/detect' || path === '/api/wallets/check' ? ['POST'] : path === '/api/summaries' ? ['GET', 'PUT'] : telegramMethods[path] || mfaMethods[path] || betaMethods[path] || iolMethods[path] || allowed;
             if (!methods.includes(method)) { res.setHeader('Allow', methods.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
             if (method !== 'GET' && path !== '/api/telegram/webhook') {
@@ -193,6 +197,21 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             if (user.setupRequired && path !== '/api/session') throw new HttpError(403, 'Creá tu contraseña para seguir usando tu cuenta.', 'SETUP_REQUIRED');
             if (path === '/api/beta/signup') return reply(200, await saveBetaSignup(db, user, await jsonBody(req), now));
             if (path === '/api/beta/feedback') return reply(200, await saveBetaFeedback(db, user, await jsonBody(req), now));
+            // IOL (solo lectura): conectar pide el PIN de Activos; los tokens de IOL nunca salen del servidor.
+            if (path === '/api/iol') return reply(200, method === 'GET' ? await iolStatus(db, user, env) : await disconnectIol(db, user));
+            if (path === '/api/iol/connect') return reply(200, await connectIol(db, user, await jsonBody(req), env, now));
+            if (path === '/api/iol/portfolio') return reply(200, await iolPortfolio(db, user, env, now));
+            if (path === '/api/iol/quotes') return reply(200, await iolQuotes(db, user, env, now, (new URL(req.url, 'http://localhost').searchParams.get('symbols') ?? '').split(',')));
+            if (path === '/api/iol/history') return reply(200, await iolHistory(db, user, env, now, fetch, { fresh: new URL(req.url, 'http://localhost').searchParams.get('fresh') === '1' }));
+            if (path === '/api/iol/alert') return reply(200, await saveIdleAlert(db, user, await jsonBody(req)));
+            // Comprar y vender (solo desde el iPhone vinculado; reglas en trading.mjs).
+            if (path === '/api/iol/orders/preview') return reply(200, await previewOrder(db, user, await jsonBody(req), env, now));
+            if (path === '/api/iol/trade-options') { const q = new URL(req.url, 'http://localhost').searchParams; return reply(200, await tradeOptions(db, user, env, now, { kind: q.get('kind'), symbol: q.get('symbol') })); }
+            if (path === '/api/iol/orders') {
+                if (method === 'GET') return reply(200, await listOrders(db, user, env, now, fetch, { notify: orderNotifier(db, env) }));
+                if (method === 'DELETE') return reply(200, await cancelOrder(db, user, (await jsonBody(req))?.id, env, now));
+                return reply(200, await placeOrder(db, user, await jsonBody(req), env, now, { verifyCode: verifyMfa, notify: orderNotifier(db, env) }));
+            }
             if (path === '/api/mfa') return reply(200, method === 'GET' ? await mfaStatus(db, user) : await disableMfa(db, user, await jsonBody(req), env, now));
             if (path === '/api/mfa/setup') return reply(200, await startMfaSetup(db, user, await jsonBody(req), env, now));
             if (path === '/api/mfa/confirm') return reply(200, await confirmMfaSetup(db, user, await jsonBody(req), env, now));

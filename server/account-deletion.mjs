@@ -13,6 +13,10 @@ import { digest } from './security.mjs';
 export const USER_DATA = [
     // [colección, campo que guarda el id de la persona]
     ['portfolios', '_id'],
+    ['iol_connections', '_id'],
+    ['iol_attempts', '_id'],
+    ['iol_history', '_id'],
+    ['iol_orders', 'userId'],
     ['beta_signups', '_id'],
     ['beta_feedback', 'userId'],
     ['scheduled_summaries', '_id'],

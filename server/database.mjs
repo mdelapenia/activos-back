@@ -15,6 +15,8 @@ export async function ensureIndexes(db) {
         db.collection('devices').createIndex({ publicId: 1 }, { unique: true }),
         db.collection('known_browsers').createIndex({ userId: 1, browser: 1 }, { unique: true }),
         db.collection('login_attempts').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+        db.collection('iol_orders').createIndex({ userId: 1, requestId: 1 }, { unique: true }),
+        db.collection('iol_orders').createIndex({ status: 1, createdAt: 1 }),
         db.collection('password_recovery').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('mfa_setup').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('mfa_attempts').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
