@@ -1,5 +1,6 @@
 import { gmailDisconnect } from './gmail-import.mjs';
 import { checkPin } from './pin-guard.mjs';
+import { digest } from './security.mjs';
 
 /**
  * Elimina la cuenta y todos sus datos (requisito del App Store, guía 5.1.1(v)).
@@ -28,6 +29,8 @@ export const USER_DATA = [
     ['oauth_access_tokens', 'userId'],
     ['oauth_refresh_tokens', 'userId'],
     ['pin_attempts', '_id'],
+    ['password_recovery', '_id'],
+    ['devices', 'userId'],
     ['sessions', 'userId'],
 ];
 
@@ -39,6 +42,8 @@ export async function deleteAccount(db, user, body, env, { revokeGmail = gmailDi
     try { await revokeGmail(db, user, env); } catch { /* Se elimina igual más abajo. */ }
 
     for (const [name, field] of USER_DATA) await db.collection(name).deleteMany({ [field]: user._id });
+    // Intentos de ingreso guardados por correo y por cuenta (solo hashes).
+    await db.collection('login_attempts').deleteMany({ _id: { $in: [`email:${digest(user.email ?? '')}`, `recover:${digest(user.email ?? '')}`, `password:${digest(user._id.toString())}`] } });
     // La cuenta va al final: si algo falla antes, la persona puede reintentar con su sesión.
     await db.collection('users').deleteOne({ _id: user._id });
     return { ok: true };

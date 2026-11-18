@@ -81,6 +81,24 @@ test('con varios avisos pendientes envía solamente el más cercano', async () =
     assert.equal(sent.length, 1);
 });
 
+test('envía cada aviso de dividendo en el plazo elegido, una sola vez', async () => {
+    const sent = [], deliveries = new Set();
+    const alerts = [7, 3, 1, 0].map(threshold => ({ id: `a${threshold}`, kind: 'dividend', assetKind: 'cedear', assetId: 'ITUB', assetName: 'ITUB', threshold }));
+    const db = { collection(name) {
+        if (name === 'push_subscriptions') return { find: () => ({ toArray: async () => [{ _id: 'device', userId: 'user' }] }) };
+        if (name === 'portfolios') return { findOne: async () => ({ portfolio: { alerts, investments: [] } }) };
+        if (name === 'push_deliveries') return { insertOne: async row => { if (deliveries.has(row._id)) throw Object.assign(new Error('duplicate'), { code: 11000 }); deliveries.add(row._id); }, deleteOne: async row => deliveries.delete(row._id) };
+        throw new Error(name);
+    } };
+    const loadDividends = async () => ({ configured: true, items: [{ status: 'ok', kind: 'cedear', ticker: 'ITUB', events: [{ payDate: '2026-11-10', eligible: true }] }] });
+    for (const day of [3, 7, 9, 10]) {
+        const now = Date.parse(`2026-11-${String(day).padStart(2, '0')}T15:00:00Z`);
+        await checkDividendPush(db, env, now, { loadDividends, deliver: async () => sent.push(day) });
+        await checkDividendPush(db, env, now, { loadDividends, deliver: async () => sent.push(day) });
+    }
+    assert.deepEqual(sent, [3, 7, 9, 10]);
+});
+
 test('la prueba de una alerta exige que pertenezca a la cartera del usuario', async () => {
     const db = { collection(name) {
         if (name === 'push_subscriptions') return { findOne: async () => ({ _id: 'device' }) };

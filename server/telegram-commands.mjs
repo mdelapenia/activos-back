@@ -102,7 +102,7 @@ export async function telegramCommand(db, userId, command, argument, env, { fetc
         if (argument.trim() && !/^[1-9]\d{0,4}$/.test(argument.trim())) return 'Usá /alertas o indicá una página, por ejemplo /alertas 2.';
         const page = Number(argument.trim() || '1'), pages = Math.ceil(alerts.length / 30);
         if (page > pages) return `Esa página no existe. Hay ${pages} ${pages === 1 ? 'página' : 'páginas'}.`;
-        return `🔔 Tus alertas (${alerts.length}) · página ${page}/${pages}\n${alerts.slice((page - 1) * 30, page * 30).map(a => `${a.assetName} · ${a.kind} · ${a.direction === 'below' ? '≤' : '≥'} ${number(a.threshold)}${['dividend', 'maturity'].includes(a.kind) ? ' días' : ''} · ${a.channels === 'push' ? 'push' : a.channels === 'telegram' ? 'Telegram' : 'push y Telegram'}${!['price', 'dividend'].includes(a.kind) ? ' (seguimiento en la app)' : ''}`).join('\n')}${page < pages ? `\nMás alertas: /alertas ${page + 1}` : ''}`;
+        return `🔔 Tus alertas (${alerts.length}) · página ${page}/${pages}\n${alerts.slice((page - 1) * 30, page * 30).map(a => `${a.assetName} · ${a.kind} · ${a.direction === 'below' ? '≤' : '≥'} ${number(a.threshold)}${['dividend', 'maturity'].includes(a.kind) ? ' días' : ''} · ${a.channels === 'push' ? 'push' : a.channels === 'telegram' ? 'Telegram' : 'push y Telegram'}${a.kind === 'concentration' ? ' (seguimiento en la app)' : ''}`).join('\n')}${page < pages ? `\nMás alertas: /alertas ${page + 1}` : ''}`;
     }
     if (command === 'dividendos') {
         if (!env.MASSIVE_API_KEY) return 'El proveedor de dividendos no está configurado.';

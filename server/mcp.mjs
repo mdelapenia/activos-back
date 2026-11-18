@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { digest, HttpError, normalizeEmail, validEmail, validPin, verifyPin } from './security.mjs';
+import { digest, HttpError, normalizeEmail, validEmail, validPin, verifyPassword, verifyPin } from './security.mjs';
 import { readPortfolio, writePortfolio } from './portfolio.mjs';
 
 const READ = 'portfolio:read';
@@ -105,7 +105,7 @@ function authPage(request, env, error = '') {
     const write = request.scopes.includes(WRITE)
         ? `<label class="permission"><input type="checkbox" name="grant_write" value="yes"><span>Permitir que este agente agregue, edite o elimine inversiones.</span></label>`
         : '<p class="note">Este agente solo solicitó acceso de lectura.</p>';
-    return `<section class="card"><p class="eyebrow">TU CARTERA PERSONAL</p><h1>Conectar ${client}<span class="sig">.</span></h1><p class="intro">Ingresá con tu correo y el PIN de tu cuenta para conectar este agente con Activos.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form class="oauth-form" data-oauth-form method="post" action="${authorizeEndpoint}"><input type="hidden" name="request_id" value="${id}"><label class="field" for="email">Correo electrónico<input id="email" name="email" type="text" inputmode="email" autocomplete="email" pattern="[^@\\s]+@[^@\\s]+\\.[^@\\s]+" maxlength="254" required placeholder="vos@correo.com"></label><label class="field" for="pin">PIN<input class="pin-input" id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="current-password" required placeholder="••••••"><span class="note">Usá tu PIN fijo de 6 dígitos.</span></label><label class="permission"><input type="checkbox" checked disabled><span>Consultar tus inversiones y preferencias básicas (necesario).</span></label>${write}<p class="note">Tu PIN solo se usa para validar tu cuenta de Activos. No se comparte con el agente. Podés revocar su acceso desde Configuración → Agentes IA.</p><div class="actions"><button class="btn-primary" name="approve" value="yes" type="submit">Conectar</button><button class="btn-ghost" name="approve" value="no" type="submit" formnovalidate>Cancelar</button></div></form></section>`;
+    return `<section class="card"><p class="eyebrow">TU CARTERA PERSONAL</p><h1>Conectar ${client}<span class="sig">.</span></h1><p class="intro">Ingresá con tu correo y la contraseña de tu cuenta para conectar este agente con Activos.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form class="oauth-form" data-oauth-form method="post" action="${authorizeEndpoint}"><input type="hidden" name="request_id" value="${id}"><label class="field" for="email">Correo electrónico<input id="email" name="email" type="text" inputmode="email" autocomplete="email" pattern="[^@\\s]+@[^@\\s]+\\.[^@\\s]+" maxlength="254" required placeholder="vos@correo.com"></label><label class="field" for="password">Contraseña<input id="password" name="password" type="password" maxlength="128" autocomplete="current-password" required placeholder="Tu contraseña"></label><label class="permission"><input type="checkbox" checked disabled><span>Consultar tus inversiones y preferencias básicas (necesario).</span></label>${write}<p class="note">Tu contraseña solo se usa para validar tu cuenta de Activos. No se comparte con el agente. Podés revocar su acceso desde Configuración → Agentes IA.</p><div class="actions"><button class="btn-primary" name="approve" value="yes" type="submit">Conectar</button><button class="btn-ghost" name="approve" value="no" type="submit" formnovalidate>Cancelar</button></div></form></section>`;
 }
 
 function completedAuthorizationPage(env) {
@@ -183,13 +183,25 @@ async function formOAuthGrant(db, req, res, env, now) {
         return res.end();
     }
     const email = normalizeEmail(form.get('email'));
-    const pin = form.get('pin') || '';
-    if (!validEmail(email) || !validPin(pin)) {
-        return html(res, authPage({ ...authorization, id: authorization._id }, env, 'Correo o PIN incorrectos.'), env, 200, [new URL(authorization.redirectUri).origin]);
-    }
+    const password = form.get('password') || '';
+    const denied = message => html(res, authPage({ ...authorization, id: authorization._id }, env, message), env, 200, [new URL(authorization.redirectUri).origin]);
+    if (!validEmail(email) || !password) return denied('Correo o contraseña incorrectos.');
+    // Mismo límite de intentos que el ingreso de la app (5 fallos → 15 minutos).
+    const attempts = db.collection('login_attempts');
+    const key = `email:${digest(email)}`;
+    const row = await attempts.findOne({ _id: key });
+    if (row?.lockedUntil && new Date(row.lockedUntil).getTime() > now) return denied('Demasiados intentos. Probá de nuevo en unos minutos.');
     const user = await db.collection('users').findOne({ email });
-    const verified = await verifyPin(pin, user?.pinHash);
-    if (!verified || !user || user.disabled) return html(res, authPage({ ...authorization, id: authorization._id }, env, 'Correo o PIN incorrectos.'), env, 200, [new URL(authorization.redirectUri).origin]);
+    // Las cuentas viejas (solo PIN) tienen que crear su contraseña en la app antes de conectar agentes.
+    if (user && !user.passwordHash && validPin(password) && await verifyPin(password, user.pinHash)) return denied('Primero creá tu contraseña en la app o en la web de Activos.');
+    const verified = await verifyPassword(password, user?.passwordHash);
+    if (!verified || !user || user.disabled) {
+        const fresh = !row || now - new Date(row.windowStart).getTime() > 15 * 60_000 || (row.lockedUntil && new Date(row.lockedUntil).getTime() <= now);
+        const count = (fresh ? 0 : row.count) + 1;
+        await attempts.updateOne({ _id: key }, { $set: { count: count >= 5 ? 0 : count, windowStart: fresh ? new Date(now) : row.windowStart, lockedUntil: count >= 5 ? new Date(now + 15 * 60_000) : null, expiresAt: new Date(now + 30 * 60_000) } }, { upsert: true });
+        return denied('Correo o contraseña incorrectos.');
+    }
+    await attempts.deleteOne({ _id: key });
     const consumed = await db.collection('oauth_requests').findOneAndDelete({
         _id: id, expiresAt: { $gt: new Date(now) },
     });

@@ -6,20 +6,21 @@ import { MongoClient } from 'mongodb';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { ensureIndexes } from '../server/database.mjs';
 import { createHandler } from '../server/handler.mjs';
-import { digest, hashPin, verifyPin } from '../server/security.mjs';
+import { digest, hashPassword, hashPin, verifyPin } from '../server/security.mjs';
 import { emptyPortfolio } from '../server/portfolio.mjs';
 
 let mongo, client, db, server, base;
 const origin = 'https://activos.example.test';
 const pin = '001234';
+const password = 'una clave bien larga';
 
 before(async () => {
     mongo = await MongoMemoryServer.create();
     client = await new MongoClient(mongo.getUri()).connect();
     db = client.db('activos_tests');
     await ensureIndexes(db);
-    const pinHash = await hashPin(pin);
-    await db.collection('users').insertMany(['a', 'b', 'limit', 'expiry'].map(name => ({ email: `${name}@example.test`, pinHash })));
+    const pinHash = await hashPin(pin), passwordHash = await hashPassword(password);
+    await db.collection('users').insertMany(['a', 'b', 'limit', 'expiry'].map(name => ({ name, email: `${name}@example.test`, pinHash, passwordHash })));
     server = createServer(createHandler({ database: async () => db, env: { APP_ORIGIN: origin, NODE_ENV: 'production' } }));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${server.address().port}`;
@@ -39,7 +40,7 @@ async function call(path, { method = 'GET', body, cookie, headers = {} } = {}) {
     });
     return { status: response.status, body: await response.json(), cookie: response.headers.get('set-cookie'), headers: response.headers };
 }
-const login = email => call('login', { method: 'POST', body: { email, pin } });
+const login = email => call('login', { method: 'POST', body: { email, password } });
 const mutation = (version, portfolio) => ({ version, portfolio, mutationId: crypto.randomUUID() });
 
 test('PIN fijo: salt distinto, verificación y ceros iniciales', async () => {
@@ -58,22 +59,33 @@ test('sin sesión no se puede leer ni escribir una cartera', async () => {
     assert.equal((await call('portfolio', { method: 'PUT', body: mutation(0, emptyPortfolio()) })).status, 401);
 });
 
-test('crea cuentas con PIN protegido, inicia sesión y evita duplicados', async () => {
-    const body = { email: ' New@Example.Test ', pin, confirmPin: pin };
+test('crea cuentas con nombre, contraseña y PIN protegidos, inicia sesión y evita duplicados', async () => {
+    const body = { name: ' Ana  Pérez ', email: ' New@Example.Test ', password, confirmPassword: password, pin, confirmPin: pin };
     const created = await call('register', { method: 'POST', body });
     assert.equal(created.status, 201);
     assert.equal(created.body.user.email, 'new@example.test');
+    assert.equal(created.body.user.name, 'Ana Pérez');
+    assert.equal(created.body.setupRequired, false);
+    assert.equal(created.body.deviceToken, undefined, 'la web no vincula dispositivos');
     assert.deepEqual(created.body.portfolio, emptyPortfolio());
     const user = await db.collection('users').findOne({ email: 'new@example.test' });
     assert.match(user.pinHash, /^scrypt-v1\$/);
+    assert.match(user.passwordHash, /^scrypt-v1\$/);
+    assert.notEqual(user.passwordHash, user.pinHash);
     assert.equal(user.pin, undefined);
+    assert.equal(user.password, undefined);
+    assert.ok(!JSON.stringify(created.body).includes('Hash'));
+    assert.equal((await call('register', { method: 'POST', body: { ...body, email: 'short@example.test', password: 'corta', confirmPassword: 'corta' } })).status, 400);
+    assert.equal((await call('register', { method: 'POST', body: { ...body, email: 'weak@example.test', pin: '123456', confirmPin: '123456' } })).status, 400);
+    assert.equal((await call('register', { method: 'POST', body: { ...body, email: 'noname@example.test', name: '  ' } })).status, 400);
+    assert.equal((await call('register', { method: 'POST', body: { ...body, email: 'pw@example.test', confirmPassword: 'otra clave bien larga' } })).status, 400);
     assert.equal((await call('session', { cookie: created.cookie.split(';')[0] })).status, 200);
     assert.equal((await call('register', { method: 'POST', body })).status, 409);
-    assert.equal((await call('register', { method: 'POST', body: { ...body, email: 'mismatch@example.test', confirmPin: '654321' } })).status, 400);
+    assert.equal((await call('register', { method: 'POST', body: { ...body, email: 'mismatch@example.test', confirmPin: '482915' } })).status, 400);
     assert.equal(await db.collection('users').countDocuments({ email: 'mismatch@example.test' }), 0);
 });
 
-test('acceso por correo/PIN, cookie protegida y cartera aislada por usuario', async () => {
+test('acceso por correo/contraseña, cookie protegida y cartera aislada por usuario', async () => {
     const auth = await login(' A@EXAMPLE.TEST ');
     assert.equal(auth.status, 200);
     assert.equal(auth.body.user.email, 'a@example.test');
@@ -140,8 +152,11 @@ test('rechaza CSRF, tipos inválidos, fechas imposibles, IDs duplicados y cuerpo
 });
 
 test('permite reintentar el acceso y rechaza sesiones vencidas aunque Mongo aún no las haya eliminado', async () => {
-    for (let i = 0; i < 5; i++) assert.equal((await call('login', { method: 'POST', body: { email: 'limit@example.test', pin: '999999' } })).status, 401);
-    assert.equal((await login('limit@example.test')).status, 200);
+    for (let i = 0; i < 4; i++) assert.equal((await call('login', { method: 'POST', body: { email: 'limit@example.test', password: 'contraseña equivocada' } })).status, 401);
+    assert.equal((await login('limit@example.test')).status, 200, 'un acierto antes del quinto error limpia el contador');
+    for (let i = 0; i < 5; i++) assert.equal((await call('login', { method: 'POST', body: { email: 'limit@example.test', password: 'contraseña equivocada' } })).status, 401);
+    assert.equal((await login('limit@example.test')).status, 429, 'tras 5 errores la cuenta espera 15 minutos aunque la contraseña sea correcta');
+    assert.equal((await call('login', { method: 'POST', body: { email: 'limit@example.test', pin, legacy: true } })).status, 429);
     const auth = await login('expiry@example.test');
     const cookie = auth.cookie.split(';')[0];
     await db.collection('sessions').updateOne({ _id: digest(cookie.split('=')[1]) }, { $set: { expiresAt: new Date(0) } });
@@ -216,7 +231,7 @@ test('OAuth MCP emite tokens PKCE, permite cambios autorizados y revoca el acces
             Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({
-            request_id: requestId, email: 'a@example.test', pin,
+            request_id: requestId, email: 'a@example.test', password,
             approve: 'yes', grant_write: 'yes',
         }),
         redirect: 'manual',

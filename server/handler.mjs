@@ -4,7 +4,8 @@ import { gmailStatus, gmailStart, gmailCallback, gmailDisconnect, gmailReadImpor
 import { registrationOptions, registerPasskey, authenticationOptions, authenticatePasskey } from './passkeys.mjs';
 import { usInflation } from './inflation.mjs';
 import { getDatabase } from './database.mjs';
-import { digest, hashPin, HttpError, newToken, normalizeEmail, validEmail, validPin, verifyPin } from './security.mjs';
+import { digest, hashPin, HttpError, newToken, validPin } from './security.mjs';
+import { changePassword, checkNewPin, clientIp, completeSetup, createRecoveryCode, recoverPassword, DEVICE_SESSION_MS, listDevices, login, publicDevice, register, revokeDevice, unlock, updateCurrentDevice, WEB_SESSION_MS } from './auth.mjs';
 import { readPortfolio, writePortfolio } from './portfolio.mjs';
 import { allowedOrigins } from './http.mjs';
 import { portfolioDividends, marketDividends } from './dividends.mjs';
@@ -21,15 +22,14 @@ import { deleteAccount } from './account-deletion.mjs';
 import { checkPin } from './pin-guard.mjs';
 
 const COOKIE = 'activos_session';
-const SESSION_SECONDS = 7 * 24 * 60 * 60;
 
 function cookieToken(req) {
     const value = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
     return value && /^[\w-]{43}$/.test(value) ? value : null;
 }
 
-function setCookie(res, token, production) {
-    res.setHeader('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=${production ? 'None' : 'Strict'}; Max-Age=${token ? SESSION_SECONDS : 0}${production ? '; Secure' : ''}`);
+function setCookie(res, token, production, ttlMs = WEB_SESSION_MS) {
+    res.setHeader('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=${production ? 'None' : 'Strict'}; Max-Age=${token ? Math.floor(ttlMs / 1000) : 0}${production ? '; Secure' : ''}`);
 }
 
 async function jsonBody(req) {
@@ -52,19 +52,31 @@ async function jsonBody(req) {
 async function requireUser(db, req, now) {
     const token = cookieToken(req);
     const session = token && await db.collection('sessions').findOne({ _id: digest(token), expiresAt: { $gt: new Date(now) } });
-    const user = session && await db.collection('users').findOne({ _id: session.userId, disabled: { $ne: true } }, { projection: { email: 1 } });
-    if (!user) throw new HttpError(401, 'Ingresá con tu correo y PIN para continuar.', 'UNAUTHENTICATED');
+    const user = session && await db.collection('users').findOne({ _id: session.userId, disabled: { $ne: true } }, { projection: { email: 1, name: 1, passwordHash: 1 } });
+    if (!user) throw new HttpError(401, 'Ingresá con tu correo y contraseña para continuar.', 'UNAUTHENTICATED');
+    // Datos de la sesión que usan las rutas; el hash de la contraseña no sale de acá.
+    user.setupRequired = !user.passwordHash;
+    delete user.passwordHash;
+    user.deviceId = session.deviceId ?? null;
     return user;
 }
 
-async function startSession(db, req, res, user, now, production) {
-    const snapshot = await readPortfolio(db, user._id);
+const publicUser = user => ({ id: user._id.toString(), email: user.email, name: user.name ?? '' });
+
+async function accountData(db, user, device) {
+    return { user: publicUser(user), setupRequired: !user.passwordHash && user.setupRequired !== false, device: device ? publicDevice(device, device._id) : null, ...await readPortfolio(db, user._id) };
+}
+
+/** Abre una sesión. Las del iPhone quedan atadas al dispositivo y duran menos (después se entra con el PIN). */
+async function startSession(db, req, res, user, now, production, { device = null, deviceToken = null } = {}) {
+    const ttlMs = device ? DEVICE_SESSION_MS : WEB_SESSION_MS;
     const token = newToken();
-    await db.collection('sessions').insertOne({ _id: digest(token), userId: user._id, createdAt: new Date(now), expiresAt: new Date(now + SESSION_SECONDS * 1000) });
+    await db.collection('sessions').insertOne({ _id: digest(token), userId: user._id, deviceId: device?._id ?? null, createdAt: new Date(now), expiresAt: new Date(now + ttlMs) });
     const oldToken = cookieToken(req);
     if (oldToken) await db.collection('sessions').deleteOne({ _id: digest(oldToken) });
-    setCookie(res, token, production);
-    return { user: { id: user._id.toString(), email: user.email }, ...snapshot };
+    setCookie(res, token, production, ttlMs);
+    // El secreto del dispositivo se entrega una única vez, al vincularlo.
+    return { ...await accountData(db, user, device), ...(deviceToken ? { deviceToken } : {}) };
 }
 
 export function createHandler({ database = getDatabase, env = process.env, clock = Date.now } = {}) {
@@ -81,7 +93,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 const db = await database();
                 if (await handleMcpRequest({ db, req, res, env, now: clock() }) !== false) return;
             }
-            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/push/native/subscribe': ['POST'], '/api/push/native/unsubscribe': ['POST'], '/api/push/native/status': ['POST'], '/api/push/native/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/world': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/pin': ['POST'], '/api/pin/verify': ['POST'], '/api/account/delete': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'], '/api/rates': ['GET'] }[path];
+            const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/push/native/subscribe': ['POST'], '/api/push/native/unsubscribe': ['POST'], '/api/push/native/status': ['POST'], '/api/push/native/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/world': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/password/recover': ['POST'], '/api/password/recovery-code': ['POST'], '/api/unlock': ['POST'], '/api/account/setup': ['POST'], '/api/password': ['POST'], '/api/devices': ['GET', 'DELETE'], '/api/devices/current': ['PUT'], '/api/pin': ['POST'], '/api/pin/verify': ['POST'], '/api/account/delete': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'], '/api/rates': ['GET'] }[path];
             const telegramMethods = { '/api/telegram': ['GET', 'DELETE'], '/api/telegram/connect': ['POST'], '/api/telegram/test': ['POST'], '/api/telegram/webhook': ['POST'] };
             if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && path !== '/api/wallets/detect' && path !== '/api/wallets/check' && path !== '/api/summaries' && !Object.hasOwn(telegramMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
             const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : path === '/api/wallets/detect' || path === '/api/wallets/check' ? ['POST'] : path === '/api/summaries' ? ['GET', 'PUT'] : telegramMethods[path] || allowed;
@@ -101,33 +113,27 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             }
             if (path === '/api/passkey/login/options') return reply(200, await authenticationOptions(db, env, now));
             if (path === '/api/passkey/login/verify') return reply(200, await startSession(db, req, res, await authenticatePasskey(db, await jsonBody(req), env, now), now, production));
-            if (path === '/api/login' || path === '/api/register') {
-                const registering = path === '/api/register';
+            if (path === '/api/register' || path === '/api/login') {
                 const body = await jsonBody(req);
-                const email = normalizeEmail(body?.email);
-                if (!validEmail(email) || !validPin(body?.pin)) throw new HttpError(400, 'Ingresá un correo válido y un PIN de 6 dígitos.');
-                if (registering) {
-                    if (body.pin !== body.confirmPin) throw new HttpError(400, 'Los PINs no coinciden.');
-                    const user = { email, pinHash: await hashPin(body.pin), createdAt: new Date(now) };
-                    try { user._id = (await db.collection('users').insertOne(user)).insertedId; }
-                    catch (error) {
-                        if (error.code === 11000) throw new HttpError(409, 'Ya existe una cuenta con ese correo. Ingresá con tu PIN.', 'ACCOUNT_EXISTS');
-                        throw error;
-                    }
-                    return reply(201, await startSession(db, req, res, user, now, production));
-                }
-                const user = await db.collection('users').findOne({ email });
-                const valid = await verifyPin(body.pin, user?.pinHash);
-                if (!valid || !user || user.disabled) throw new HttpError(401, 'Correo o PIN incorrectos.', 'INVALID_CREDENTIALS');
-                return reply(200, await startSession(db, req, res, user, now, production));
+                const { user, linked } = path === '/api/register' ? await register(db, body, clientIp(req), now) : await login(db, body, clientIp(req), now);
+                return reply(path === '/api/register' ? 201 : 200, await startSession(db, req, res, user, now, production, { device: linked?.device, deviceToken: linked?.token }));
+            }
+            if (path === '/api/password/recover') return reply(200, await recoverPassword(db, await jsonBody(req), clientIp(req), now));
+            // Solo iOS: el iPhone vinculado + el PIN abren una sesión nueva.
+            if (path === '/api/unlock') {
+                const { user, device } = await unlock(db, await jsonBody(req), now);
+                return reply(200, await startSession(db, req, res, user, now, production, { device }));
             }
             if (path === '/api/pin') {
                 const user = await requireUser(db, req, now);
+                if (user.setupRequired) throw new HttpError(403, 'Creá tu contraseña para seguir usando tu cuenta.', 'SETUP_REQUIRED');
                 const body = await jsonBody(req);
                 if (!validPin(body?.currentPin) || !validPin(body?.newPin)) throw new HttpError(400, 'El PIN debe tener 6 dígitos.');
-                if (body.newPin !== body.confirmPin) throw new HttpError(400, 'Los PINs nuevos no coinciden.');
                 await checkPin(db, user, body.currentPin, now, { field: 'el PIN actual' });
+                checkNewPin(body.newPin, body.confirmPin);
+                if (body.newPin === body.currentPin) throw new HttpError(400, 'Elegí un PIN distinto del actual.');
                 await db.collection('users').updateOne({ _id: user._id }, { $set: { pinHash: await hashPin(body.newPin) } });
+                await db.collection('password_recovery').deleteOne({ _id: user._id });
                 const currentToken = cookieToken(req);
                 if (currentToken) await db.collection('sessions').deleteMany({ userId: user._id, _id: { $ne: digest(currentToken) } });
                 return reply(200, { ok: true });
@@ -135,6 +141,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             // Comprueba el PIN sin cambiar nada (p. ej. antes de pedir el PIN nuevo). Con límite de intentos.
             if (path === '/api/pin/verify') {
                 const user = await requireUser(db, req, now);
+                if (user.setupRequired) throw new HttpError(403, 'Creá tu contraseña para seguir usando tu cuenta.', 'SETUP_REQUIRED');
                 await checkPin(db, user, (await jsonBody(req))?.pin, now, { field: 'el PIN actual' });
                 return reply(200, { ok: true });
             }
@@ -151,6 +158,18 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 return reply(200, { ok: true });
             }
             const user = await requireUser(db, req, now);
+            if (path === '/api/account/setup') return reply(200, await completeSetup(db, user, await jsonBody(req), now));
+            // Cuenta vieja (solo PIN): hasta que cree su contraseña solo puede ver la sesión y completarla.
+            if (user.setupRequired && path !== '/api/session') throw new HttpError(403, 'Creá tu contraseña para seguir usando tu cuenta.', 'SETUP_REQUIRED');
+            if (path === '/api/password/recovery-code') return reply(200, await createRecoveryCode(db, user, now));
+            if (path === '/api/password') return reply(200, await changePassword(db, user, await jsonBody(req), cookieToken(req), now));
+            if (path === '/api/devices') {
+                if (method === 'GET') return reply(200, { devices: await listDevices(db, user) });
+                const result = await revokeDevice(db, user, (await jsonBody(req))?.id);
+                if (result.current) setCookie(res, '', production);
+                return reply(200, result);
+            }
+            if (path === '/api/devices/current') return reply(200, await updateCurrentDevice(db, user, await jsonBody(req)));
             if (path === '/api/mcp/authorizations') {
                 if (method === 'GET') return reply(200, { authorizations: await listAuthorizations(db, user) });
                 return reply(200, await revokeAuthorization(db, user, (await jsonBody(req))?.id));
@@ -203,7 +222,7 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             }
             if (path === '/api/rates') { try { return reply(200, await ratesOverview(db, now)); } catch { throw new HttpError(503, 'No se pudieron consultar las tasas. Volvé a intentar en un momento.'); } }
             if (path === '/api/inflation/us') return reply(200, await usInflation(now));
-            if (path === '/api/session') return reply(200, { user: { id: user._id.toString(), email: user.email }, ...await readPortfolio(db, user._id) });
+            if (path === '/api/session') return reply(200, await accountData(db, user, user.deviceId && await db.collection('devices').findOne({ _id: user.deviceId })));
             if (path === '/api/market-calendar/earnings') {
                 const date = new URL(req.url, 'http://localhost').searchParams.get('date') ?? '';
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) throw new HttpError(400, 'Fecha inválida.');

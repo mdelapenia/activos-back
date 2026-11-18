@@ -1,8 +1,8 @@
 import webpush from 'web-push';
 import { sendTelegram } from './telegram.mjs';
 
-// `native: true` incluye los iPhone con la app (tokens de Expo). Por ahora la app recibe solo
-// el resumen programado y el radar de tasas; las alertas de precio y dividendos siguen en web y Telegram.
+// `native: true` incluye los iPhone con la app (tokens de Expo): resumen, radar de tasas y todas las
+// alertas (precio, variación del día, dividendos y vencimientos).
 export async function notificationSubscriptions(db, env, { native = false } = {}) {
     const rows = await db.collection('push_subscriptions').find(native ? {} : { channel: { $ne: 'expo' } }).toArray();
     if (!env.TELEGRAM_BOT_TOKEN) return rows;
@@ -276,7 +276,7 @@ export async function checkDividendPush(db, env, now = Date.now(), { loadDividen
 
     if (!env.MASSIVE_API_KEY) return;
 
-    const subscriptions = await notificationSubscriptions(db, env);
+    const subscriptions = await notificationSubscriptions(db, env, { native: true });
 
     const users = new Map();
 
@@ -457,7 +457,7 @@ export async function loadPriceQuotes(alerts, fetcher = fetch) {
 
 export async function checkPricePush(db, env, now = Date.now(), { loadQuotes = loadPriceQuotes, deliver = deliverNotification } = {}) {
 
-    const subscriptions = await notificationSubscriptions(db, env);
+    const subscriptions = await notificationSubscriptions(db, env, { native: true });
 
     const users = new Map();
 
@@ -508,4 +508,109 @@ export async function checkPricePush(db, env, now = Date.now(), { loadQuotes = l
 
     }
 
+}
+
+
+// --- Variación del día y vencimientos -------------------------------------------------------------
+
+const argentinaToday = now => new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+const signedPct = value => `${value >= 0 ? '+' : '−'}${Math.abs(value).toFixed(2).replace('.', ',')}%`;
+
+/** Variación del día (%) de cada activo: Data912 (`pct_change`) y CoinGecko (24 h). FCI y Morpho no informan. */
+export async function loadDailyChanges(alerts, fetcher = fetch) {
+    const changes = {};
+    const groups = new Map();
+    for (const alert of alerts) groups.set(alert.assetKind, [...(groups.get(alert.assetKind) || []), alert.assetId]);
+    const paths = { cedear: 'arg_cedears', stock: 'usa_stocks', 'arg-stock': 'arg_stocks', bond: 'arg_bonds', lecap: 'arg_notes' };
+    await Promise.allSettled([...groups].map(async ([kind, ids]) => {
+        const unique = [...new Set(ids)];
+        let url;
+        if (kind === 'crypto') url = `https://api.coingecko.com/api/v3/simple/price?${new URLSearchParams({ ids: unique.join(','), vs_currencies: 'usd', include_24hr_change: 'true' })}`;
+        else if (paths[kind]) url = `https://data912.com/live/${paths[kind]}`;
+        else return;
+        const response = await fetcher(url, { signal: AbortSignal.timeout(15000) });
+        if (!response.ok) throw new Error('Proveedor de precios no disponible');
+        const data = await response.json();
+        for (const id of unique) {
+            const change = kind === 'crypto' ? Number(data?.[id]?.usd_24h_change)
+                : Number((Array.isArray(data) && data.find(item => String(item?.symbol ?? '').toUpperCase() === id.toUpperCase()))?.pct_change);
+            if (Number.isFinite(change)) changes[`${kind}:${id}`] = change;
+        }
+    }));
+    return changes;
+}
+
+function variationPushPayload(alert, change) {
+    const up = change >= 0;
+    return {
+        title: `${up ? '🚀' : '🔻'} ${alert.assetName} · Variación del día`,
+        body: `Hoy ${up ? 'sube' : 'baja'} ${signedPct(change)}. Tu alerta era ${alert.direction === 'above' ? 'subir' : 'bajar'} ${String(alert.threshold).replace('.', ',')}% o más.`,
+        url: '/'
+    };
+}
+
+function maturityPushPayload(alert, days) {
+    const date = alert.date.split('-').reverse().join('/');
+    return {
+        title: `⏰ ${alert.assetName} · Vencimiento`,
+        body: days === 0 ? `Vence hoy (${date}). Acordate de renovarlo o retirarlo.` : `Vence ${days === 1 ? 'mañana' : `en ${days} días`} (${date}).`,
+        url: '/'
+    };
+}
+
+/** Agrupa las suscripciones por persona y carga su cartera con las alertas del tipo pedido. */
+async function alertsByUser(db, env, kind) {
+    const users = new Map();
+    for (const row of await notificationSubscriptions(db, env, { native: true })) { const key = String(row.userId); if (!users.has(key)) users.set(key, []); users.get(key).push(row); }
+    const result = [];
+    for (const rows of users.values()) {
+        try {
+            const { portfolio } = await readPortfolio(db, rows[0].userId);
+            const alerts = (portfolio.alerts || []).filter(alert => alert.kind === kind);
+            if (alerts.length) result.push({ rows, portfolio, alerts });
+        } catch (error) { console.error(`No se pudieron cargar alertas (${kind}):`, error.message); }
+    }
+    return result;
+}
+
+async function deliverOnce(db, row, id, payload, env, deliver, now, label) {
+    try {
+        await db.collection('push_deliveries').insertOne({ _id: id, createdAt: new Date(now) });
+        try { await deliver(db, row, payload, env); }
+        catch (error) { await db.collection('push_deliveries').deleteOne({ _id: id }); throw error; }
+    } catch (error) { if (error.code !== 11000) console.error(`No se pudo enviar una alerta de ${label}:`, error.message); }
+}
+
+/** Variación del día: avisa una vez por día cuando sube o baja más que el porcentaje elegido. */
+export async function checkVariationPush(db, env, now = Date.now(), { loadChanges = loadDailyChanges, deliver = deliverNotification } = {}) {
+    const users = await alertsByUser(db, env, 'variation');
+    if (!users.length) return;
+    const changes = await loadChanges(users.flatMap(user => user.alerts));
+    const today = argentinaToday(now);
+    for (const { rows, portfolio, alerts } of users) {
+        if (isQuietHours(portfolio.preferences?.quietHours, now)) continue;
+        for (const alert of alerts) {
+            const change = changes[`${alert.assetKind}:${alert.assetId}`];
+            if (!Number.isFinite(change)) continue;
+            const matched = alert.direction === 'above' ? change >= alert.threshold : change <= -Math.abs(alert.threshold);
+            if (!matched) continue;
+            for (const row of rows) if (receives(alert, row))
+                await deliverOnce(db, row, digest(`variation:${row._id}:${alert.id}:${today}`), variationPushPayload(alert, change), env, deliver, now, 'variación');
+        }
+    }
+}
+
+/** Vencimientos: avisa una vez cuando faltan los días elegidos (o menos) para la fecha. */
+export async function checkMaturityPush(db, env, now = Date.now(), { deliver = deliverNotification } = {}) {
+    const users = await alertsByUser(db, env, 'maturity');
+    const todayMs = Date.parse(`${argentinaToday(now)}T00:00:00Z`);
+    for (const { rows, portfolio, alerts } of users) {
+        if (isQuietHours(portfolio.preferences?.quietHours, now)) continue;
+        for (const alert of alerts) {
+            const days = Math.round((Date.parse(`${alert.date}T00:00:00Z`) - todayMs) / 86400000);
+            if (!Number.isFinite(days) || days < 0 || days > alert.threshold) continue;
+            for (const row of rows) if (receives(alert, row))
+                await deliverOnce(db, row, digest(`maturity:${row._id}:${alert.id}:${alert.date}`), maturityPushPayload(alert, days), env, deliver, now, 'vencimiento');
+        }
+    }
 }
