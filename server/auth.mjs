@@ -40,12 +40,19 @@ async function assertNotLocked(db, keys, now) {
     const rows = await db.collection('login_attempts').find({ _id: { $in: keys } }).toArray();
     const until = Math.max(0, ...rows.map(row => row.lockedUntil ? new Date(row.lockedUntil).getTime() : 0));
     if (until > now) {
-        const minutes = Math.ceil((until - now) / 60_000);
-        throw new HttpError(429, `Demasiados intentos. Probá de nuevo en ${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}.`, 'TOO_MANY_ATTEMPTS');
+        throw lockedError(until, now);
     }
 }
 
-/** Suma un intento dentro de una ventana de 15 minutos; al llegar al máximo, bloquea 15 minutos. */
+/** Bloqueo por intentos: el mensaje dice cuánto falta y `retryAfter` (segundos) deja mostrar una cuenta regresiva. */
+function lockedError(until, now) {
+    const minutes = Math.ceil((until - now) / 60_000);
+    const error = new HttpError(429, `Demasiados intentos. Probá de nuevo en ${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}.`, 'TOO_MANY_ATTEMPTS');
+    error.retryAfter = Math.ceil((until - now) / 1000);
+    return error;
+}
+
+/** Suma un intento dentro de una ventana de 15 minutos; al llegar al máximo, bloquea 15 minutos. Devuelve cuántos quedan. */
 async function countAttempt(db, key, max, now) {
     const attempts = db.collection('login_attempts');
     const row = await attempts.findOne({ _id: key });
@@ -60,6 +67,7 @@ async function countAttempt(db, key, max, now) {
             expiresAt: new Date(now + 2 * LOCK_MS),
         },
     }, { upsert: true });
+    return { left: locked ? 0 : max - count, until: locked ? now + LOCK_MS : null };
 }
 
 const clearAttempts = (db, key) => db.collection('login_attempts').deleteOne({ _id: key });
@@ -164,9 +172,14 @@ export async function login(db, body, ip, now) {
         ? !user?.passwordHash && await verifyPin(secret, user?.pinHash)
         : await verifyPassword(secret, user?.passwordHash);
     if (!ok || !user || user.disabled) {
-        await countAttempt(db, emailKey, LOGIN_MAX_FAILURES, now);
-        await countAttempt(db, ipKey, IP_MAX_FAILURES, now);
-        throw new HttpError(401, generic, 'INVALID_CREDENTIALS');
+        // Los intentos se cuentan por correo exista o no la cuenta: decir cuántos quedan no revela si existe.
+        const byEmail = await countAttempt(db, emailKey, LOGIN_MAX_FAILURES, now);
+        const byIp = await countAttempt(db, ipKey, IP_MAX_FAILURES, now);
+        const until = Math.max(byEmail.until ?? 0, byIp.until ?? 0);
+        if (until > now) throw lockedError(until, now);
+        const error = new HttpError(401, `${generic} ${byEmail.left === 1 ? 'Te queda 1 intento' : `Te quedan ${byEmail.left} intentos`} antes de un bloqueo de 15 minutos.`, 'INVALID_CREDENTIALS');
+        error.attemptsLeft = byEmail.left;
+        throw error;
     }
     await clearAttempts(db, emailKey);
     const info = cleanDevice(body?.device);
