@@ -14,6 +14,7 @@ export const USER_DATA = [
     // [colección, campo que guarda el id de la persona]
     ['portfolios', '_id'],
     ['scheduled_summaries', '_id'],
+    ['market_saved', '_id'],
     ['summary_snapshots', 'userId'],
     ['push_subscriptions', 'userId'],
     ['telegram_subscriptions', '_id'],
