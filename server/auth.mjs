@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { verifyMfa } from './mfa.mjs';
 import {
     cleanName, digest, hashPassword, hashPin, HttpError, newToken, normalizeEmail, PASSWORD_RULE,
     validEmail, validName, validPassword, validPin, verifyPassword, verifyPin, weakPin,
@@ -92,6 +93,7 @@ export async function createDevice(db, user, info, now) {
 export const publicDevice = (device, currentId = null) => device && {
     id: device.publicId, name: device.name, platform: device.platform, lockAfterMs: device.lockAfterMs ?? DEFAULT_LOCK_MS,
     createdAt: device.createdAt, lastUsedAt: device.lastUsedAt, current: currentId != null && device._id === currentId,
+    location: device.location ?? null,
 };
 
 export async function listDevices(db, user) {
@@ -159,7 +161,7 @@ export async function register(db, body, ip, now) {
  * Ingreso con correo y contraseña. Las cuentas creadas antes de las contraseñas entran una
  * única vez con correo y PIN (`legacy: true`) y la app les pide completar nombre y contraseña.
  */
-export async function login(db, body, ip, now) {
+export async function login(db, body, ip, now, env = process.env) {
     const email = normalizeEmail(body?.email);
     const legacy = body?.legacy === true;
     const secret = legacy ? body?.pin : body?.password;
@@ -180,6 +182,14 @@ export async function login(db, body, ip, now) {
         const error = new HttpError(401, `${generic} ${byEmail.left === 1 ? 'Te queda 1 intento' : `Te quedan ${byEmail.left} intentos`} antes de un bloqueo de 15 minutos.`, 'INVALID_CREDENTIALS');
         error.attemptsLeft = byEmail.left;
         throw error;
+    }
+    if (await db.collection('mfa').findOne({ _id: user._id, enabled: true })) {
+        if (!body?.mfaCode) throw new HttpError(401, 'Ingresá el código de tu autenticador o uno de respaldo.', 'MFA_REQUIRED');
+        if (!await verifyMfa(db, user._id, body.mfaCode, env, now)) {
+            await countAttempt(db, emailKey, LOGIN_MAX_FAILURES, now);
+            await countAttempt(db, ipKey, IP_MAX_FAILURES, now);
+            throw new HttpError(401, 'El código no es válido o ya se usó.', 'MFA_INVALID');
+        }
     }
     await clearAttempts(db, emailKey);
     const info = cleanDevice(body?.device);
@@ -235,6 +245,7 @@ export async function changePassword(db, user, body, currentToken, now) {
     if (body.newPassword === body.currentPassword) throw new HttpError(400, 'Elegí una contraseña distinta de la actual.');
     await db.collection('users').updateOne({ _id: user._id }, { $set: { passwordHash: await hashPassword(body.newPassword), passwordChangedAt: new Date(now) } });
     await db.collection('password_recovery').deleteOne({ _id: user._id });
+    await db.collection('known_browsers').deleteMany({ userId: user._id });
     await db.collection('devices').deleteMany({ userId: user._id, _id: { $ne: user.deviceId ?? null } });
     await db.collection('sessions').deleteMany({ userId: user._id, _id: { $ne: currentToken ? digest(currentToken) : null } });
     return { ok: true };
@@ -271,6 +282,7 @@ export async function recoverPassword(db, body, ip, now) {
     }
     await db.collection('users').updateOne({ _id: user._id }, { $set: { passwordHash, passwordChangedAt: new Date(now) } });
     await db.collection('devices').deleteMany({ userId: user._id });
+    await db.collection('known_browsers').deleteMany({ userId: user._id });
     await db.collection('sessions').deleteMany({ userId: user._id });
     await clearAttempts(db, emailKey);
     return { ok: true };

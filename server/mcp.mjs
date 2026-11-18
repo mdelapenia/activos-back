@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { digest, HttpError, normalizeEmail, validEmail, validPin, verifyPassword, verifyPin } from './security.mjs';
 import { readPortfolio, writePortfolio } from './portfolio.mjs';
+import { verifyMfa } from './mfa.mjs';
 
 const READ = 'portfolio:read';
 const WRITE = 'portfolio:write';
@@ -105,7 +106,7 @@ function authPage(request, env, error = '') {
     const write = request.scopes.includes(WRITE)
         ? `<label class="permission"><input type="checkbox" name="grant_write" value="yes"><span>Permitir que este agente agregue, edite o elimine inversiones.</span></label>`
         : '<p class="note">Este agente solo solicitó acceso de lectura.</p>';
-    return `<section class="card"><p class="eyebrow">TU CARTERA PERSONAL</p><h1>Conectar ${client}<span class="sig">.</span></h1><p class="intro">Ingresá con tu correo y la contraseña de tu cuenta para conectar este agente con Activos.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form class="oauth-form" data-oauth-form method="post" action="${authorizeEndpoint}"><input type="hidden" name="request_id" value="${id}"><label class="field" for="email">Correo electrónico<input id="email" name="email" type="text" inputmode="email" autocomplete="email" pattern="[^@\\s]+@[^@\\s]+\\.[^@\\s]+" maxlength="254" required placeholder="vos@correo.com"></label><label class="field" for="password">Contraseña<input id="password" name="password" type="password" maxlength="128" autocomplete="current-password" required placeholder="Tu contraseña"></label><label class="permission"><input type="checkbox" checked disabled><span>Consultar tus inversiones y preferencias básicas (necesario).</span></label>${write}<p class="note">Tu contraseña solo se usa para validar tu cuenta de Activos. No se comparte con el agente. Podés revocar su acceso desde Configuración → Agentes IA.</p><div class="actions"><button class="btn-primary" name="approve" value="yes" type="submit">Conectar</button><button class="btn-ghost" name="approve" value="no" type="submit" formnovalidate>Cancelar</button></div></form></section>`;
+    return `<section class="card"><p class="eyebrow">TU CARTERA PERSONAL</p><h1>Conectar ${client}<span class="sig">.</span></h1><p class="intro">Ingresá con tu correo y la contraseña de tu cuenta para conectar este agente con Activos.</p>${error ? `<p class="error" role="alert">${escapeHtml(error)}</p>` : ''}<form class="oauth-form" data-oauth-form method="post" action="${authorizeEndpoint}"><input type="hidden" name="request_id" value="${id}"><label class="field" for="email">Correo electrónico<input id="email" name="email" type="text" inputmode="email" autocomplete="email" pattern="[^@\\s]+@[^@\\s]+\\.[^@\\s]+" maxlength="254" required placeholder="vos@correo.com"></label><label class="field" for="password">Contraseña<input id="password" name="password" type="password" maxlength="128" autocomplete="current-password" required placeholder="Tu contraseña"></label><label class="field" for="mfa_code">Código de autenticador o respaldo (si activaste MFA)<input id="mfa_code" name="mfa_code" type="text" autocomplete="one-time-code" maxlength="24"></label><label class="permission"><input type="checkbox" checked disabled><span>Consultar tus inversiones y preferencias básicas (necesario).</span></label>${write}<p class="note">Tu contraseña solo se usa para validar tu cuenta de Activos. No se comparte con el agente. Podés revocar su acceso desde Configuración → Agentes IA.</p><div class="actions"><button class="btn-primary" name="approve" value="yes" type="submit">Conectar</button><button class="btn-ghost" name="approve" value="no" type="submit" formnovalidate>Cancelar</button></div></form></section>`;
 }
 
 function completedAuthorizationPage(env) {
@@ -202,6 +203,11 @@ async function formOAuthGrant(db, req, res, env, now) {
         return denied('Correo o contraseña incorrectos.');
     }
     await attempts.deleteOne({ _id: key });
+    if (await db.collection('mfa').findOne({ _id: user._id, enabled: true })) {
+        const code = form.get('mfa_code') || '';
+        if (!code) return denied('Ingresá también tu código de verificación en dos pasos.');
+        if (!await verifyMfa(db, user._id, code, env, now)) return denied('El código de verificación no es válido o ya se usó.');
+    }
     const consumed = await db.collection('oauth_requests').findOneAndDelete({
         _id: id, expiresAt: { $gt: new Date(now) },
     });

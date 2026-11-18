@@ -8,7 +8,7 @@ import { digest, hashPin, HttpError, newToken, validPin } from './security.mjs';
 import { changePassword, checkNewPin, clientIp, completeSetup, createRecoveryCode, recoverPassword, DEVICE_SESSION_MS, listDevices, login, publicDevice, register, revokeDevice, unlock, updateCurrentDevice, WEB_SESSION_MS } from './auth.mjs';
 import { readPortfolio, writePortfolio } from './portfolio.mjs';
 import { allowedOrigins } from './http.mjs';
-import { portfolioDividends, marketDividends } from './dividends.mjs';
+import { portfolioDividends, marketDividends, assetDividends } from './dividends.mjs';
 import { earningsCalendar } from './market-calendar.mjs';
 import { stockQuotes, stockHistory } from './stock-quotes.mjs';
 import { worldClimate } from './world.mjs';
@@ -21,8 +21,13 @@ import { handleMcpRequest, listAuthorizations, revokeAuthorization } from './mcp
 import { deleteAccount } from './account-deletion.mjs';
 import { checkPin } from './pin-guard.mjs';
 import { marketSaved } from './market-saved.mjs';
+import { confirmMfaSetup, disableMfa, mfaDetails, mfaStatus, regenerateLegacyRecovery, startMfaSetup } from './mfa.mjs';
+import { notifyNewLogin } from './security-notices.mjs';
+import { updateDeviceLocation } from './device-location.mjs';
+import { saveBetaFeedback, saveBetaSignup } from './beta.mjs';
 
 const COOKIE = 'activos_session';
+const BROWSER_COOKIE = 'activos_browser';
 
 function cookieToken(req) {
     const value = (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
@@ -31,6 +36,17 @@ function cookieToken(req) {
 
 function setCookie(res, token, production, ttlMs = WEB_SESSION_MS) {
     res.setHeader('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=${production ? 'None' : 'Strict'}; Max-Age=${token ? Math.floor(ttlMs / 1000) : 0}${production ? '; Secure' : ''}`);
+}
+
+/** Identifica el navegador para los avisos; no sirve para abrir una sesión. */
+function browserMarker(req, res, production) {
+    const saved = (req.headers.cookie || '').split(';').map(value => value.trim()).find(value => value.startsWith(`${BROWSER_COOKIE}=`))?.slice(BROWSER_COOKIE.length + 1);
+    if (saved && /^[\w-]{43}$/.test(saved)) return saved;
+    const id = newToken();
+    const cookie = `${BROWSER_COOKIE}=${id}; Path=/; HttpOnly; SameSite=${production ? 'None' : 'Strict'}; Max-Age=31536000${production ? '; Secure' : ''}`;
+    const previous = res.getHeader('Set-Cookie');
+    res.setHeader('Set-Cookie', previous ? [...(Array.isArray(previous) ? previous : [previous]), cookie] : cookie);
+    return id;
 }
 
 async function jsonBody(req) {
@@ -95,9 +111,12 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 if (await handleMcpRequest({ db, req, res, env, now: clock() }) !== false) return;
             }
             const allowed = { '/api/push/config': ['GET'], '/api/push/subscribe': ['POST'], '/api/push/unsubscribe': ['POST'], '/api/push/status': ['POST'], '/api/push/test': ['POST'], '/api/push/native/subscribe': ['POST'], '/api/push/native/unsubscribe': ['POST'], '/api/push/native/status': ['POST'], '/api/push/native/test': ['POST'], '/api/stocks/quotes': ['GET'], '/api/stocks/history': ['GET'], '/api/world': ['GET'], '/api/imports/extract': ['POST'], '/api/imports/resend': ['GET', 'POST'], '/api/imports/gmail': ['GET', 'POST'], '/api/imports/gmail/start': ['POST'], '/api/imports/gmail/sync': ['POST'], '/api/imports/gmail/callback': ['GET'], '/api/passkey/status': ['GET'], '/api/passkey/remove': ['POST'], '/api/passkey/register/options': ['POST'], '/api/passkey/register/verify': ['POST'], '/api/passkey/login/options': ['POST'], '/api/passkey/login/verify': ['POST'], '/api/login': ['POST'], '/api/register': ['POST'], '/api/password/recover': ['POST'], '/api/password/recovery-code': ['POST'], '/api/unlock': ['POST'], '/api/account/setup': ['POST'], '/api/password': ['POST'], '/api/devices': ['GET', 'DELETE'], '/api/devices/current': ['PUT'], '/api/pin': ['POST'], '/api/pin/verify': ['POST'], '/api/account/delete': ['POST'], '/api/logout': ['POST'], '/api/session': ['GET'], '/api/portfolio': ['GET', 'PUT'], '/api/mcp/authorizations': ['GET', 'DELETE'], '/api/dividends': ['GET'], '/api/dividends/market': ['GET'], '/api/market-calendar/earnings': ['GET'], '/api/inflation/us': ['GET'], '/api/benchmarks/merval': ['GET'], '/api/rates': ['GET'], '/api/market/saved': ['GET', 'PUT'] }[path];
+            const betaMethods = { '/api/beta/signup': ['POST'], '/api/beta/feedback': ['POST'] };
+
             const telegramMethods = { '/api/telegram': ['GET', 'DELETE'], '/api/telegram/connect': ['POST'], '/api/telegram/test': ['POST'], '/api/telegram/webhook': ['POST'] };
-            if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && path !== '/api/wallets/detect' && path !== '/api/wallets/check' && path !== '/api/summaries' && !Object.hasOwn(telegramMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
-            const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : path === '/api/wallets/detect' || path === '/api/wallets/check' ? ['POST'] : path === '/api/summaries' ? ['GET', 'PUT'] : telegramMethods[path] || allowed;
+            const mfaMethods = { '/api/mfa': ['GET', 'DELETE'], '/api/mfa/setup': ['POST'], '/api/mfa/confirm': ['POST'], '/api/mfa/details': ['POST'], '/api/mfa/recovery/regenerate': ['POST'] };
+            if (!allowed && path !== '/api/wallets' && path !== '/api/wallets/holdings' && path !== '/api/wallets/detect' && path !== '/api/wallets/check' && path !== '/api/summaries' && !Object.hasOwn(telegramMethods, path) && !Object.hasOwn(mfaMethods, path) && !Object.hasOwn(betaMethods, path)) throw new HttpError(404, 'No se encontró esta operación.');
+            const methods = path === '/api/wallets' ? ['GET', 'POST', 'DELETE'] : path === '/api/wallets/holdings' ? ['GET'] : path === '/api/wallets/detect' || path === '/api/wallets/check' ? ['POST'] : path === '/api/summaries' ? ['GET', 'PUT'] : telegramMethods[path] || mfaMethods[path] || betaMethods[path] || allowed;
             if (!methods.includes(method)) { res.setHeader('Allow', methods.join(', ')); throw new HttpError(405, 'Método no permitido.'); }
             const production = env.NODE_ENV === 'production' || env.VERCEL === '1';
             if (method !== 'GET' && path !== '/api/telegram/webhook') {
@@ -113,16 +132,26 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 res.statusCode = 303; res.setHeader('Location', new URL('/importaciones', env.APP_ORIGIN).toString()); return res.end();
             }
             if (path === '/api/passkey/login/options') return reply(200, await authenticationOptions(db, env, now));
-            if (path === '/api/passkey/login/verify') return reply(200, await startSession(db, req, res, await authenticatePasskey(db, await jsonBody(req), env, now), now, production));
+            if (path === '/api/passkey/login/verify') {
+                const body = await jsonBody(req);
+                const user = await authenticatePasskey(db, body, env, now);
+                const account = await startSession(db, req, res, user, now, production);
+                await notifyNewLogin(db, user, { ...body, browserId: browserMarker(req, res, production) }, env, now).catch(() => {});
+                return reply(200, account);
+            }
             if (path === '/api/register' || path === '/api/login') {
                 const body = await jsonBody(req);
-                const { user, linked } = path === '/api/register' ? await register(db, body, clientIp(req), now) : await login(db, body, clientIp(req), now);
-                return reply(path === '/api/register' ? 201 : 200, await startSession(db, req, res, user, now, production, { device: linked?.device, deviceToken: linked?.token }));
+                const { user, linked } = path === '/api/register' ? await register(db, body, clientIp(req), now) : await login(db, body, clientIp(req), now, env);
+                if (linked?.device) await updateDeviceLocation(db, linked.device, clientIp(req));
+                const account = await startSession(db, req, res, user, now, production, { device: linked?.device, deviceToken: linked?.token });
+                if (path === '/api/login') await notifyNewLogin(db, user, linked?.device ? body : { ...body, browserId: browserMarker(req, res, production) }, env, now).catch(() => {});
+                return reply(path === '/api/register' ? 201 : 200, account);
             }
             if (path === '/api/password/recover') return reply(200, await recoverPassword(db, await jsonBody(req), clientIp(req), now));
             // Solo iOS: el iPhone vinculado + el PIN abren una sesión nueva.
             if (path === '/api/unlock') {
                 const { user, device } = await unlock(db, await jsonBody(req), now);
+                await updateDeviceLocation(db, device, clientIp(req));
                 return reply(200, await startSession(db, req, res, user, now, production, { device }));
             }
             if (path === '/api/pin') {
@@ -162,6 +191,13 @@ export function createHandler({ database = getDatabase, env = process.env, clock
             if (path === '/api/account/setup') return reply(200, await completeSetup(db, user, await jsonBody(req), now));
             // Cuenta vieja (solo PIN): hasta que cree su contraseña solo puede ver la sesión y completarla.
             if (user.setupRequired && path !== '/api/session') throw new HttpError(403, 'Creá tu contraseña para seguir usando tu cuenta.', 'SETUP_REQUIRED');
+            if (path === '/api/beta/signup') return reply(200, await saveBetaSignup(db, user, await jsonBody(req), now));
+            if (path === '/api/beta/feedback') return reply(200, await saveBetaFeedback(db, user, await jsonBody(req), now));
+            if (path === '/api/mfa') return reply(200, method === 'GET' ? await mfaStatus(db, user) : await disableMfa(db, user, await jsonBody(req), env, now));
+            if (path === '/api/mfa/setup') return reply(200, await startMfaSetup(db, user, await jsonBody(req), env, now));
+            if (path === '/api/mfa/confirm') return reply(200, await confirmMfaSetup(db, user, await jsonBody(req), env, now));
+            if (path === '/api/mfa/details') return reply(200, await mfaDetails(db, user, await jsonBody(req), env, now));
+            if (path === '/api/mfa/recovery/regenerate') return reply(200, await regenerateLegacyRecovery(db, user, await jsonBody(req), env, now));
             if (path === '/api/password/recovery-code') return reply(200, await createRecoveryCode(db, user, now));
             if (path === '/api/password') return reply(200, await changePassword(db, user, await jsonBody(req), cookieToken(req), now));
             if (path === '/api/devices') {
@@ -229,6 +265,12 @@ export function createHandler({ database = getDatabase, env = process.env, clock
                 const date = new URL(req.url, 'http://localhost').searchParams.get('date') ?? '';
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) throw new HttpError(400, 'Fecha inválida.');
                 return reply(200, await earningsCalendar(date));
+            }
+            if (path === '/api/dividends/asset') {
+                const params = new URL(req.url, 'http://localhost').searchParams;
+                const kind = params.get('kind'), ticker = (params.get('ticker') || '').toUpperCase();
+                if (!['stock', 'cedear'].includes(kind) || !/^[A-Z0-9][A-Z0-9.\-]{0,19}$/.test(ticker)) throw new HttpError(400, 'Activo inválido.');
+                return reply(200, await assetDividends(kind, ticker, env.MASSIVE_API_KEY, fetch, now));
             }
             if (path === '/api/dividends/market') return reply(200, await marketDividends(env.MASSIVE_API_KEY, fetch, now));
             if (path === '/api/dividends') return reply(200, await portfolioDividends((await readPortfolio(db, user._id)).portfolio, env.MASSIVE_API_KEY));
