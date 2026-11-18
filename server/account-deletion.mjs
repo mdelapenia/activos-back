@@ -13,6 +13,8 @@ import { digest } from './security.mjs';
 export const USER_DATA = [
     // [colección, campo que guarda el id de la persona]
     ['portfolios', '_id'],
+    ['beta_signups', '_id'],
+    ['beta_feedback', 'userId'],
     ['scheduled_summaries', '_id'],
     ['summary_snapshots', 'userId'],
     ['push_subscriptions', 'userId'],
@@ -30,7 +32,11 @@ export const USER_DATA = [
     ['oauth_refresh_tokens', 'userId'],
     ['pin_attempts', '_id'],
     ['password_recovery', '_id'],
+    ['mfa', '_id'],
+    ['mfa_setup', '_id'],
+    ['mfa_attempts', '_id'],
     ['devices', 'userId'],
+    ['known_browsers', 'userId'],
     ['sessions', 'userId'],
 ];
 

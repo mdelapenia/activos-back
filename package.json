@@ -24,6 +24,7 @@
     "@tesseract.js-data/spa": "^1.0.0",
     "bitcoinjs-lib": "^7.0.5",
     "mongodb": "^7.8.0",
+    "otplib": "^13.6.0",
     "pdfjs-dist": "^6.5.438",
     "tesseract.js": "^7.0.0",
     "web-push": "^3.6.7"

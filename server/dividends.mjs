@@ -54,6 +54,22 @@ export async function portfolioDividends(portfolio, apiKey, fetcher = fetch, now
     return { configured: true, items };
 }
 
+/** Dividendos de un activo, sin requerir que forme parte de la cartera. */
+export async function assetDividends(kind, ticker, apiKey, fetcher = fetch, now = Date.now()) {
+    if (!['stock', 'cedear'].includes(kind) || typeof ticker !== 'string' || !/^[A-Z0-9][A-Z0-9.\-]{0,19}$/.test(ticker)) throw new Error('Activo inválido');
+    // Se reutiliza la misma consulta, conversión de CEDEAR y proyección que usa la cartera.
+    const portfolio = { investments: [{ id: 'asset', name: ticker, kind, coin: ticker, units: 1, date: '1900-01-01' }] };
+    const result = await portfolioDividends(portfolio, apiKey, fetcher, now);
+    if (!result.configured) return { configured: false, status: 'unavailable', events: [] };
+    const item = result.items[0];
+    return {
+        configured: true, status: item.status,
+        ...(item.symbol ? { symbol: item.symbol } : {}),
+        ...(item.ratio ? { ratio: item.ratio } : {}),
+        events: (item.events ?? []).map(({ payDate, exDate, amountPerShare, estimated, sourcePayDate }) => ({ payDate, exDate, amountPerShare, estimated: !!estimated, ...(sourcePayDate ? { sourcePayDate } : {}) })),
+    };
+}
+
 // Massive cubre principalmente valores de EE. UU.; no representa todas las bolsas del mundo.
 export async function marketDividends(apiKey, fetcher = fetch, now = Date.now()) {
     if (!apiKey) return { configured: false, items: [], truncated: false };
