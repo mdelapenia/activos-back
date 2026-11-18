@@ -19,6 +19,9 @@ export const ORDER_LIMIT = 500_000;
 export const DAILY_LIMIT = 2_000_000;
 export const COOLDOWN_MS = 24 * 60 * 60_000;
 export const PRICE_CAP = 0.03;
+// Código 2FA de una orden: se acepta hasta 5 minutos después de generado (hay que salir a copiarlo y después poner el PIN).
+// Sigue siendo de un solo uso. Hacia adelante, 30 s (por si el reloj del teléfono va adelantado).
+export const ORDER_CODE_TOLERANCE = [5 * 60, 30];
 const KINDS = new Set(['cedear', 'arg-stock', 'bond', 'lecap', 'fund']);
 const ZONE = 'America/Argentina/Buenos_Aires';
 const localDay = t => new Date(t).toLocaleDateString('en-CA', { timeZone: ZONE });
@@ -234,7 +237,7 @@ export async function placeOrder(db, user, body, env, now, { fetcher = fetch, ve
             const current = await db.collection('users').findOne({ _id: user._id }, { projection: { passwordHash: 1 } });
             if (!await verifyPassword(body?.password, current?.passwordHash)) throw new HttpError(401, 'La contraseña es incorrecta.', 'INVALID_CREDENTIALS');
         }
-        if (!await verifyCode(db, user._id, body?.code, env, now)) throw new HttpError(401, 'El código de verificación no es válido.', 'INVALID_CREDENTIALS');
+        if (!await verifyCode(db, user._id, body?.code, env, now, { tolerance: ORDER_CODE_TOLERANCE })) throw new HttpError(401, 'El código de verificación no es válido.', 'INVALID_CREDENTIALS');
     }
 
     const order = {

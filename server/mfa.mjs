@@ -69,7 +69,8 @@ export async function confirmMfaSetup(db, user, body, env, now) {
 }
 
 /** Código TOTP o código de respaldo, cada uno consumido de manera atómica. */
-export async function verifyMfa(db, userId, code, env, now) {
+/** `tolerance`: segundos hacia atrás o [atrás, adelante] que se acepta un código (30 s por defecto). */
+export async function verifyMfa(db, userId, code, env, now, { tolerance = 30 } = {}) {
     const row = await db.collection('mfa').findOne({ _id: userId, enabled: true });
     if (!row) return false;
     await attempt(db, userId, now);
@@ -81,7 +82,7 @@ export async function verifyMfa(db, userId, code, env, now) {
         return false;
     }
     if (!/^\d{6}$/.test(token)) return false;
-    const result = await verify({ secret: unseal(row.secret, userId, env), token, epoch: Math.floor(now / 1000), epochTolerance: 30, afterTimeStep: row.lastStep });
+    const result = await verify({ secret: unseal(row.secret, userId, env), token, epoch: Math.floor(now / 1000), epochTolerance: tolerance, afterTimeStep: row.lastStep });
     if (!result.valid) return false;
     const claimed = await db.collection('mfa').updateOne({ _id: userId, enabled: true, lastStep: row.lastStep }, { $set: { lastStep: result.timeStep } });
     if (claimed.modifiedCount === 1) { await clearAttempts(db, userId); return true; }
